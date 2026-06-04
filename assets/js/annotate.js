@@ -481,7 +481,7 @@
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
             </button>
             <div class="annotate-dropdown hidden">
-              <button class="annotate-dropdown-item">Edit</button>
+              <button class="annotate-dropdown-item annotate-edit-btn">Edit</button>
               <button class="annotate-dropdown-item danger">Delete</button>
             </div>
           </div>
@@ -504,6 +504,43 @@
       });
       document.addEventListener('click', function () {
         dropdown.classList.add('hidden');
+      });
+
+      // Edit
+      cardBody.querySelector('.annotate-edit-btn').addEventListener('click', function () {
+        dropdown.classList.add('hidden');
+        const noteEl = cardBody.querySelector('.annotate-note-text');
+        const currentText = noteEl.textContent;
+
+        // Replace note with inline editor
+        const editor = document.createElement('div');
+        editor.innerHTML = `
+          <textarea class="annotate-card-composer" style="margin-top:8px;">${currentText}</textarea>
+          <div class="annotate-card-actions">
+            <button class="annotate-btn-cancel">Cancel</button>
+            <button class="annotate-btn-save">Save</button>
+          </div>
+        `;
+        noteEl.replaceWith(editor);
+        const textarea = editor.querySelector('textarea');
+        textarea.focus();
+        textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+
+        editor.querySelector('.annotate-btn-save').addEventListener('click', function () {
+          const updated = textarea.value.trim();
+          if (!updated) return;
+          const newNote = document.createElement('p');
+          newNote.className = 'annotate-note-text';
+          newNote.textContent = updated;
+          editor.replaceWith(newNote);
+        });
+
+        editor.querySelector('.annotate-btn-cancel').addEventListener('click', function () {
+          const restored = document.createElement('p');
+          restored.className = 'annotate-note-text';
+          restored.textContent = currentText;
+          editor.replaceWith(restored);
+        });
       });
 
       // Delete
