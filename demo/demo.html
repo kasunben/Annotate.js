@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Annotate.js Demo</title>
+  <style>
+    body {
+      font-family: Georgia, serif;
+      max-width: 720px;
+      margin: 60px auto;
+      padding: 0 24px;
+      color: #1a1a1a;
+      line-height: 1.75;
+    }
+    h1 { font-size: 2rem; margin-bottom: 0.25em; }
+    h2 { font-size: 1.25rem; margin-top: 2em; }
+    p { margin: 1em 0; }
+    .byline { color: #666; font-size: 0.9rem; margin-bottom: 2em; }
+  </style>
+</head>
+<body>
+
+  <h1>The Case for Slower Software</h1>
+  <p class="byline">By A. Reviewer · June 2026</p>
+
+  <p>
+    We have spent two decades optimising software for speed of delivery. Continuous deployment, trunk-based development, feature flags, and A/B tests have collapsed the distance between an idea and its appearance in production to a matter of hours. This is, in most respects, a genuine achievement.
+  </p>
+
+  <p>
+    But speed has a shadow. When the cost of shipping is low, the cost of thinking is paid less often. Features accumulate. Interfaces grow. Each addition is justified in isolation — a reasonable response to a reasonable request — and the sum of reasonable decisions becomes an unreasonable product.
+  </p>
+
+  <h2>The Accumulation Problem</h2>
+
+  <p>
+    Software complexity is not linear. Adding a feature does not merely add its own weight; it adds the weight of its interactions with everything already present. A settings screen with ten options has forty-five possible pairwise interactions. At twenty options, it has one hundred and ninety. Most of these interactions are never tested. Many are never considered.
+  </p>
+
+  <p>
+    This is why large software products so often feel simultaneously over-featured and incomplete. The surface area is vast, but the coherence is thin. No one intended this outcome. It arrived gradually, one sensible decision at a time.
+  </p>
+
+  <h2>What Slowness Buys</h2>
+
+  <p>
+    Slowing down does not mean shipping less. It means inserting deliberation between impulse and action. It means asking whether a feature should exist before asking how it should be built. It means treating the removal of something as an act worthy of the same attention as its addition.
+  </p>
+
+  <p>
+    The teams that produce unusually coherent software tend not to be slower in absolute terms. They are slower at the beginning — in the thinking, the questioning, the refusal to begin until the problem is understood — and faster at the end, because they are not navigating the debris of premature decisions.
+  </p>
+
+  <h2>A Modest Proposal</h2>
+
+  <p>
+    Before the next feature is added, ask what would have to be true for it not to be needed. Before the next screen is designed, ask what the user actually needs to accomplish. Before the next line is written, ask whether the line should exist at all.
+  </p>
+
+  <p>
+    These are not novel questions. They are simply asked less often than they should be, in an industry that has learned to mistake motion for progress.
+  </p>
+
+  <script src="../assets/js/annotate.js" data-site-id="demo-site"></script>
+</body>
+</html>
