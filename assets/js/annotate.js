@@ -5,16 +5,14 @@
   const style = document.createElement('style');
   style.textContent = `
     #annotate-sidebar {
-      position: fixed;
+      position: absolute;
       top: 0;
       right: 0;
       width: 320px;
-      height: 100vh;
+      min-height: 100%;
       background: #fff;
       border-left: 1px solid #e0e0e0;
       box-shadow: -2px 0 8px rgba(0,0,0,0.08);
-      display: flex;
-      flex-direction: column;
       z-index: 9999;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       font-size: 14px;
@@ -26,6 +24,8 @@
     }
 
     #annotate-sidebar-header {
+      position: sticky;
+      top: 0;
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -33,28 +33,31 @@
       border-bottom: 1px solid #e0e0e0;
       font-weight: 600;
       color: #1a1a1a;
-      flex-shrink: 0;
+      background: #fff;
+      z-index: 1;
     }
 
     #annotate-sidebar-body {
-      flex: 1;
-      overflow-y: auto;
-      padding: 16px;
+      position: relative;
       color: #666;
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
     }
 
     #annotate-empty {
+      position: absolute;
+      top: 16px;
+      left: 16px;
       color: #999;
       font-size: 13px;
     }
 
     .annotate-card {
+      position: absolute;
+      left: 12px;
+      right: 12px;
       border: 1px solid #e8e8e8;
       border-radius: 8px;
       overflow: hidden;
+      background: #fff;
     }
 
     .annotate-card-quote {
@@ -238,6 +241,9 @@
   `;
   document.head.appendChild(style);
 
+  // Attach sidebar to <html> so it's not affected by body margins/padding
+  document.documentElement.style.position = 'relative';
+
   // --- Sidebar ---
   const sidebar = document.createElement('div');
   sidebar.id = 'annotate-sidebar';
@@ -250,7 +256,7 @@
       <span id="annotate-empty">No annotations yet.</span>
     </div>
   `;
-  document.body.appendChild(sidebar);
+  document.documentElement.appendChild(sidebar);
 
   const sidebarBody = document.getElementById('annotate-sidebar-body');
   const emptyMsg = document.getElementById('annotate-empty');
@@ -259,7 +265,7 @@
   const toggle = document.createElement('button');
   toggle.id = 'annotate-toggle';
   toggle.textContent = 'Annotations';
-  document.body.appendChild(toggle);
+  document.documentElement.appendChild(toggle);
 
   // --- Open/close logic ---
   function openSidebar() {
@@ -287,9 +293,10 @@
       const mark = document.createElement('mark');
       mark.className = 'annotate-highlight';
       range.surroundContents(mark);
+      return mark;
     } catch (e) {
-      // surroundContents fails if range crosses element boundaries; fall back to no-op for POC
       console.warn('Annotate.js: could not highlight range', e);
+      return null;
     }
   }
 
@@ -309,7 +316,19 @@
       </div>
     `;
 
+    // Position card at the same vertical offset as the selection in the document.
+    // Cards are inside #annotate-sidebar-body which starts below the sticky header,
+    // so subtract the header height to keep card aligned with the highlight.
+    const headerHeight = document.getElementById('annotate-sidebar-header').offsetHeight;
+    let pendingTop = 8;
+    if (range) {
+      const rect = range.getBoundingClientRect();
+      pendingTop = Math.max(0, rect.top + window.scrollY - headerHeight);
+    }
+    card.style.top = pendingTop + 'px';
+
     sidebarBody.appendChild(card);
+    sidebarBody.style.minHeight = (pendingTop + 200) + 'px';
 
     const textarea = card.querySelector('.annotate-card-composer');
     const saveBtn = card.querySelector('.annotate-btn-save');
@@ -322,8 +341,13 @@
       const note = textarea.value.trim();
       if (!note) return;
 
-      // Highlight the annotated text in the document
-      if (range) highlightRange(range);
+      // Highlight the annotated text and position card at the same doc offset
+      const mark = range ? highlightRange(range) : null;
+      if (mark) {
+        const markTop = mark.getBoundingClientRect().top + window.scrollY - headerHeight;
+        card.style.top = Math.max(0, markTop) + 'px';
+        sidebarBody.style.minHeight = (markTop + card.offsetHeight + 16) + 'px';
+      }
 
       // Replace composer with saved note + replies section
       const cardBody = card.querySelector('.annotate-card-body');
@@ -393,7 +417,7 @@
   commentBtn.id = 'annotate-comment-btn';
   commentBtn.classList.add('hidden');
   commentBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"/><path d="M7 11h10"/><path d="M7 15h6"/><path d="M7 7h8"/></svg>';
-  document.body.appendChild(commentBtn);
+  document.documentElement.appendChild(commentBtn);
 
   let lastSelectedText = '';
   let lastSelectedRange = null;
