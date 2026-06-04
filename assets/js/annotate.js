@@ -63,15 +63,120 @@
     .annotate-card-quote {
       background: #f9f6f0;
       border-left: 3px solid #d4a843;
-      padding: 8px 10px;
+      padding: 8px 12px;
       font-size: 12px;
-      color: #555;
+      color: #777;
       font-style: italic;
       line-height: 1.5;
     }
 
     .annotate-card-body {
-      padding: 10px;
+      padding: 12px;
+    }
+
+    .annotate-meta {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+      position: relative;
+    }
+
+    .annotate-card-actions-meta {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      margin-left: auto;
+    }
+
+    .annotate-icon-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: #aaa;
+      padding: 4px;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
+    }
+
+    .annotate-icon-btn:hover {
+      background: #f0f0f0;
+      color: #333;
+    }
+
+    .annotate-dropdown {
+      position: absolute;
+      top: 100%;
+      right: 0;
+      background: #fff;
+      border: 1px solid #e0e0e0;
+      border-radius: 6px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+      z-index: 10002;
+      min-width: 140px;
+      padding: 4px 0;
+    }
+
+    .annotate-dropdown.hidden {
+      display: none;
+    }
+
+    .annotate-dropdown-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 12px;
+      font-size: 13px;
+      color: #1a1a1a;
+      cursor: pointer;
+      background: none;
+      border: none;
+      width: 100%;
+      text-align: left;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }
+
+    .annotate-dropdown-item:hover {
+      background: #f5f5f5;
+    }
+
+    .annotate-dropdown-item.danger {
+      color: #d00;
+    }
+
+    .annotate-avatar {
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      background: #d0d0d0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 700;
+      color: #fff;
+      flex-shrink: 0;
+      background: linear-gradient(135deg, #667eea, #764ba2);
+    }
+
+    .annotate-meta-text {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+    }
+
+    .annotate-author {
+      font-size: 13px;
+      font-weight: 600;
+      color: #1a1a1a;
+    }
+
+    .annotate-timestamp {
+      font-size: 11px;
+      color: #999;
     }
 
     .annotate-card-composer {
@@ -131,32 +236,38 @@
     .annotate-note-text {
       font-size: 13px;
       color: #1a1a1a;
-      line-height: 1.5;
+      line-height: 1.6;
       margin: 0;
     }
 
     .annotate-replies {
       border-top: 1px solid #f0f0f0;
-      display: flex;
-      flex-direction: column;
-      gap: 0;
     }
 
     .annotate-reply {
-      padding: 8px 10px;
+      padding: 10px 12px;
       border-top: 1px solid #f0f0f0;
-      font-size: 13px;
-      color: #1a1a1a;
-      line-height: 1.5;
-    }
-
-    .annotate-reply:first-child {
-      border-top: none;
     }
 
     .annotate-reply-action {
-      padding: 6px 10px;
+      padding: 8px 12px;
       border-top: 1px solid #f0f0f0;
+    }
+
+    .annotate-reply-input {
+      width: 100%;
+      box-sizing: border-box;
+      border: 1px solid #e8e8e8;
+      border-radius: 20px;
+      padding: 8px 14px;
+      font-size: 13px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      outline: none;
+      color: #1a1a1a;
+      background: #f7f7f7;
+      cursor: pointer;
+      text-align: left;
+      color: #aaa;
     }
 
     .annotate-reply-link {
@@ -343,15 +454,74 @@
 
       // Highlight the annotated text and position card at the same doc offset
       const mark = range ? highlightRange(range) : null;
+      if (mark) card._annotationMark = mark;
       if (mark) {
         const markTop = mark.getBoundingClientRect().top + window.scrollY - headerHeight;
         card.style.top = Math.max(0, markTop) + 'px';
         sidebarBody.style.minHeight = (markTop + card.offsetHeight + 16) + 'px';
       }
 
+      const now = new Date();
+      const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
       // Replace composer with saved note + replies section
       const cardBody = card.querySelector('.annotate-card-body');
-      cardBody.innerHTML = `<p class="annotate-note-text">${note}</p>`;
+      cardBody.innerHTML = `
+        <div class="annotate-meta">
+          <div class="annotate-avatar">A</div>
+          <div class="annotate-meta-text">
+            <span class="annotate-author">Anonymous</span>
+            <span class="annotate-timestamp">${timeStr} · Today</span>
+          </div>
+          <div class="annotate-card-actions-meta">
+            <button class="annotate-icon-btn annotate-resolve-btn" title="Resolve">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            </button>
+            <button class="annotate-icon-btn annotate-menu-btn" title="More">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+            </button>
+            <div class="annotate-dropdown hidden">
+              <button class="annotate-dropdown-item">Edit</button>
+              <button class="annotate-dropdown-item danger">Delete</button>
+            </div>
+          </div>
+        </div>
+        <p class="annotate-note-text">${note}</p>
+      `;
+
+      // Resolve button
+      cardBody.querySelector('.annotate-resolve-btn').addEventListener('click', function () {
+        card.style.opacity = '0.4';
+        card.style.pointerEvents = 'none';
+      });
+
+      // Three-dot menu
+      const menuBtn = cardBody.querySelector('.annotate-menu-btn');
+      const dropdown = cardBody.querySelector('.annotate-dropdown');
+      menuBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        dropdown.classList.toggle('hidden');
+      });
+      document.addEventListener('click', function () {
+        dropdown.classList.add('hidden');
+      });
+
+      // Delete
+      cardBody.querySelector('.annotate-dropdown-item.danger').addEventListener('click', function () {
+        // Remove highlight from document, preserving the text
+        if (card._annotationMark) {
+          const mark = card._annotationMark;
+          const parent = mark.parentNode;
+          if (parent) {
+            while (mark.firstChild) parent.insertBefore(mark.firstChild, mark);
+            parent.removeChild(mark);
+          }
+        }
+        card.remove();
+        if (!sidebarBody.querySelector('.annotate-card')) {
+          emptyMsg.style.display = '';
+        }
+      });
 
       const replies = document.createElement('div');
       replies.className = 'annotate-replies';
@@ -399,9 +569,21 @@
       const text = textarea.value.trim();
       if (!text) return;
 
+      const now = new Date();
+      const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
       const replyEl = document.createElement('div');
       replyEl.className = 'annotate-reply';
-      replyEl.textContent = text;
+      replyEl.innerHTML = `
+        <div class="annotate-meta">
+          <div class="annotate-avatar">A</div>
+          <div class="annotate-meta-text">
+            <span class="annotate-author">Anonymous</span>
+            <span class="annotate-timestamp">${timeStr} · Today</span>
+          </div>
+        </div>
+        <p class="annotate-note-text">${text}</p>
+      `;
       replies.insertBefore(replyEl, composerWrap);
 
       composerWrap.remove();
