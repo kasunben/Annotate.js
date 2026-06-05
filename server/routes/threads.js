@@ -62,6 +62,14 @@ router.patch('/:id/resolve', function (req, res) {
   res.json(rowToThread(row));
 });
 
+// DELETE /threads?siteId=X  — hard-delete all threads for a site (used by Settings → Clear all)
+router.delete('/', function (req, res) {
+  const { siteId } = req.query;
+  if (!siteId) return res.status(400).json({ error: 'siteId is required' });
+  db.prepare('DELETE FROM threads WHERE site_id = ?').run(siteId);
+  res.status(204).end();
+});
+
 // DELETE /threads/:id  — soft-delete
 router.delete('/:id', function (req, res) {
   const { deletedAt } = req.body;
