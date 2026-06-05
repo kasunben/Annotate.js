@@ -269,10 +269,10 @@ GET includes soft-deleted threads so deletes propagate to other clients on pull.
 
 ## Testing
 
-```bash
-npm start
-# open http://localhost:3000/demo/demo.html in two browser windows
-```
+Two demo pages available after `npm start`:
+
+- **Offline-only (no server)**: `http://localhost:3000/demo/demo.html`
+- **Multi-user sync**: `http://localhost:3000/demo/demo-sync-with-server.html` (open in two windows to test real-time sync)
 
 **Note:** The server runs on port 3000. If the port is already in use (common during development when testing stops and the process remains), use `npm run kill-port` to free it, or manually kill the process with `lsof -nP -iTCP:3000 -sTCP:LISTEN` and `kill -9 <PID>`.
 

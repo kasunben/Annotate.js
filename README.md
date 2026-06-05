@@ -56,7 +56,12 @@ npm start
         data-sync-url="http://localhost:3000"></script>
 ```
 
-Open `http://localhost:3000/demo/demo.html` in two browser windows and annotate — changes appear in both within 30 seconds, or immediately on tab focus.
+Two demo pages are available:
+
+- **`http://localhost:3000/demo/demo.html`** — Offline-only (IndexedDB, no server)
+- **`http://localhost:3000/demo/demo-sync-with-server.html`** — Multi-user sync enabled
+
+To test multi-user sync, open the second URL in two browser windows and annotate — changes appear in both within 30 seconds, or immediately on tab focus.
 
 ---
 
@@ -143,12 +148,10 @@ Thread {
 
 ## Testing
 
-No automated test suite. Use the demo page:
+No automated test suite. Two demo pages available after `npm start`:
 
-```bash
-npm start
-# open http://localhost:3000/demo/demo.html
-```
+- **Offline mode**: `http://localhost:3000/demo/demo.html`
+- **Sync mode**: `http://localhost:3000/demo/demo-sync-with-server.html` (test in two windows)
 
 **Checklist:**
 - [ ] Select text → comment button appears
