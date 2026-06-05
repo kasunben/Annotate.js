@@ -90,15 +90,28 @@ Select text → add comment
 
 ```
 Annotate.js/
-├── assets/js/annotate.js   # Entire client library — single IIFE, no build needed
-├── demo/demo.html           # Manual test page (served by the server at /demo/demo.html)
+├── assets/js/annotate.js            # Entire client library — single IIFE, no build needed
+├── demo/
+│   ├── demo.html                    # Offline-only test page (no data-sync-url)
+│   └── demo-sync-with-server.html  # Multi-user sync test page (data-sync-url set)
 ├── server/
-│   ├── index.js             # Express entry point; also serves static files
-│   ├── db.js                # SQLite schema + rowToThread/threadToRow helpers
-│   └── routes/threads.js    # REST endpoints
+│   ├── index.js                     # Express entry point; also serves static files
+│   ├── db.js                        # SQLite schema + rowToThread/threadToRow helpers
+│   └── routes/threads.js            # REST endpoints
 ├── package.json
 └── docs/
+    ├── screenshot.png               # UI mockup used in this README
+    └── annotate-js-concept.md      # Phase 1 spec & architecture decisions
 ```
+
+---
+
+## npm scripts
+
+| Script | Command | Description |
+|--------|---------|-------------|
+| `npm start` | `node server/index.js` | Start the server on port 3000 |
+| `npm run kill-port` | *(bash)* | Free port 3000 if already in use |
 
 ---
 
@@ -150,10 +163,12 @@ Thread {
 
 No automated test suite. Two demo pages available after `npm start`:
 
-- **Offline mode**: `http://localhost:3000/demo/demo.html`
-- **Sync mode**: `http://localhost:3000/demo/demo-sync-with-server.html` (test in two windows)
+| Page | URL | Use for |
+|------|-----|---------|
+| Offline | `http://localhost:3000/demo/demo.html` | IDB-only testing, no server needed |
+| Sync | `http://localhost:3000/demo/demo-sync-with-server.html` | Multi-user sync — open in two windows |
 
-**Checklist:**
+**Core checklist** (use either demo page):
 - [ ] Select text → comment button appears
 - [ ] Add thread → highlight + card appear in sidebar
 - [ ] Reload → threads and highlights restored
@@ -161,12 +176,14 @@ No automated test suite. Two demo pages available after `npm start`:
 - [ ] Replies persist across reload
 - [ ] Resolved tab shows resolved threads
 - [ ] Activity tab shows all events
-- [ ] Kill server → can still annotate (offline mode)
-- [ ] Restart server → offline annotations sync automatically
-- [ ] Open two windows → changes appear in both within 30 s
 - [ ] Settings → Clear all → sidebar empties immediately, stays empty after reload
 
----
+**Sync checklist** (use `demo-sync-with-server.html` in two windows):
+- [ ] User A annotates → User B sees it within 30 s (or on tab focus)
+- [ ] User A resolves → User B's card dims within 30 s
+- [ ] User A deletes → User B's highlight unwraps within 30 s
+- [ ] Kill server → User A can still annotate (offline mode, `dirty=true`)
+- [ ] Restart server → User A's offline annotations push automatically
 
 ---
 

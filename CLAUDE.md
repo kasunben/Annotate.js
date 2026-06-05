@@ -2,6 +2,8 @@
 
 Lightweight vanilla JS library that adds inline annotation and threaded comments to any web page via a single `<script>` tag. Zero dependencies, zero build step.
 
+> **Git workflow:** Do NOT commit or push to the remote repository unless the user explicitly asks. Make changes locally and wait for instruction before staging, committing, or pushing.
+
 ## Project Structure
 
 ```
