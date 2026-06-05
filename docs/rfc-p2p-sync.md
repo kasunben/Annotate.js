@@ -8,7 +8,7 @@
 
 ## Summary
 
-Add an optional peer-to-peer sync mode to Annotate.js, activated by a new `data-room-id` script attribute. Annotation data flows directly between browsers via WebRTC (DTLS-encrypted), with no server required. Signaling is handled by public BitTorrent trackers and NOSTR relays via the Trystero library — zero infrastructure cost.
+Add an optional peer-to-peer sync mode to Annotate.js, activated by a new `data-room-id` script attribute. Annotation data flows directly between browsers via WebRTC (DTLS-encrypted), with no server required. Signaling (the initial peer handshake) is handled by **NOSTR relays** via the Trystero library — zero infrastructure cost, no BitTorrent involvement.
 
 The existing offline mode and server sync path are unchanged. P2P is a third, parallel mode.
 
@@ -54,11 +54,15 @@ The two sync modes are **mutually exclusive** — mixing them on a single page i
 
 ## Architecture
 
-### Signaling: Trystero
+### Signaling: Trystero (NOSTR strategy)
 
-[Trystero](https://github.com/dmotz/trystero) is a ~20 KB JavaScript library that establishes WebRTC connections between browsers using public BitTorrent trackers and NOSTR relays as the signaling channel. No server is needed. The only information visible to the signaling infrastructure is the **room name** — annotation content never passes through it.
+[Trystero](https://github.com/dmotz/trystero) is a ~20 KB JavaScript library that establishes WebRTC connections between browsers using a pluggable signaling backend. This project uses the **NOSTR strategy** (`trystero/nostr`) exclusively.
+
+NOSTR is a decentralized relay protocol. Trystero uses it to exchange the small ICE SDP offer/answer messages needed to set up a WebRTC connection. The only information visible to NOSTR relays is the **room name** — annotation content never passes through any relay.
 
 Once connected, data flows over WebRTC data channels encrypted with DTLS (the same transport security as HTTPS).
+
+Trystero also supports BitTorrent trackers as a signaling backend. **This project does not use that strategy** — see the [Legal & Compliance](#legal--compliance) section.
 
 ### Data flow
 
@@ -68,7 +72,7 @@ Browser A                                        Browser B
 openDB → loadThreads (IDB)                       openDB → loadThreads (IDB)
          ↓
 Trystero.joinRoom(_roomId)  ←── signaling ──►  Trystero.joinRoom(_roomId)
-                                 (BitTorrent trackers / NOSTR)
+                                 (NOSTR relays)
                                  only room name visible
               ↕  WebRTC data channel (DTLS encrypted)
 
@@ -141,7 +145,7 @@ Server files (`server/`) are **not touched**. The P2P mode is purely additive.
 | **Offline writes** | `dirty` flag, flushed on next server contact | Queued in IDB; broadcast when a peer is online |
 | **Conflict resolution** | Last-write-wins (server clock) | Last-write-wins (client clocks) |
 | **Activity history** | Server-persisted, visible to latecomers | Broadcast only — latecomers miss offline events |
-| **Reliability** | Depends on your server uptime | Depends on BitTorrent tracker / NOSTR relay availability |
+| **Reliability** | Depends on your server uptime | Depends on NOSTR relay availability (multiple public relays; highly resilient) |
 
 ### The persistence gap
 
@@ -154,17 +158,49 @@ For async workflows, the server sync path remains the better choice.
 
 ---
 
-## Open questions
+## Legal & Compliance
+
+### Why not BitTorrent trackers?
+
+Trystero's BitTorrent tracker strategy works by announcing a room name to public torrent trackers (e.g. `wss://tracker.openwebtorrent.com`) to exchange ICE SDP messages. Using a tracker for peer signaling is not copyright infringement — no content swarm is joined, no files are shared. However, it creates several practical problems for EU deployments:
+
+**1. GDPR — IP address exposure**  
+Connecting to a BitTorrent tracker causes your IP address to be logged by the tracker operator. Under GDPR (Article 4), IP addresses are personal data. Public BitTorrent tracker operators are typically outside the EU and operate with no Data Processing Agreement, no privacy policy targeting EU users, and no mechanism for data deletion requests. Embedding a script that causes users' IPs to be sent to such operators without disclosure creates GDPR liability for the site operator.
+
+**2. German & EU copyright enforcement climate**  
+Germany, Austria, and the Netherlands have historically seen mass Abmahnung (cease-and-desist) campaigns where law firms subpoenaed ISPs for the identities of IP addresses that appeared in tracker logs — even for brief, non-infringing connections. While courts would not find signaling-only tracker use to be infringement, the IP appearing in tracker logs is enough to trigger automated enforcement letters. The legal defence is valid; the cost and disruption of receiving one is not.
+
+**3. Corporate and institutional network blocks**  
+Many enterprise networks, universities, and government institutions in Germany and across the EU firewall all BitTorrent tracker traffic at the network layer. A script that relies on BT tracker signaling silently fails to connect for these users, with no fallback.
+
+### NOSTR as the signaling backend
+
+NOSTR relays are lightweight WebSocket servers that relay signed events. They carry no BitTorrent association, are not blocked by enterprise firewalls, and are operated by a wide variety of independent operators in multiple jurisdictions (including EU-based ones). The room name is visible to relay operators as a short string; no annotation content passes through.
+
+GDPR exposure is reduced: NOSTR relay operators are more likely to be accessible, documentable entities, and the data exchanged (a room name + ephemeral public key) is less sensitive than an IP/swarm association.
+
+**For maximum privacy** (self-hosted signaling): the self-hosted signaling server alternative (see Alternatives Considered) stores no data and is fully GDPR-controllable, at the cost of reintroducing a hosting requirement.
+
+### Privacy policy guidance
+
+Sites using P2P mode should disclose in their privacy policy:
+- That WebRTC connections are established between users' browsers
+- That the room name is shared with NOSTR relay infrastructure during connection setup
+- That annotation data is transmitted directly between browsers and not stored on any server
 
 ### 1. Bundle strategy
 
-Trystero is published as an ES module. The current `annotate.js` is a plain IIFE with no build-time bundling — terser only minifies it.
+Trystero is published as an ES module. The current `annotate.js` is a plain IIFE with no build-time bundling — terser only minifies it. Using the NOSTR strategy requires importing from `trystero/nostr`:
+
+```js
+import { joinRoom } from 'trystero/nostr'
+```
 
 Options:
-- **(a) esbuild/rollup bundle step** — bundle Trystero into the IIFE at build time. Clean, self-contained output. Adds a build dependency and slightly changes the build pipeline.
+- **(a) esbuild/rollup bundle step** — bundle `trystero/nostr` into the IIFE at build time. Clean, self-contained output. Adds a build dependency and replaces terser with esbuild (which also handles minification).
 - **(b) Dynamic `import()` at runtime** — load Trystero from a CDN (e.g. jsDelivr) when P2P mode is activated. Keeps the build simple but adds a runtime network dependency, which conflicts with the offline-first goal.
 
-**Recommendation: option (a)** — esbuild replaces terser; it handles both bundling and minification, and the output is still a single file.
+**Recommendation: option (a)** — esbuild replaces terser; it handles both bundling and minification, and the output is still a single self-contained file.
 
 ### 2. Room ID derivation
 
@@ -197,13 +233,17 @@ Full cross-device P2P sync via `data-room-id`. Requires resolving the bundle str
 
 ## Alternatives considered
 
+### Trystero — BitTorrent tracker strategy
+
+Trystero's `trystero/torrent` strategy uses public BitTorrent trackers for signaling. Technically functional and zero-cost, but rejected for the reasons detailed in the [Legal & Compliance](#legal--compliance) section: GDPR IP exposure, German/EU enforcement climate risk, and widespread enterprise firewall blocks.
+
 ### PeerJS cloud
 
-PeerJS offers a hosted signaling server (free tier). Simpler API than raw WebRTC, but depends on PeerJS's cloud infrastructure and requires a `peerjs` dependency. Trystero is preferred because it has no single point of failure.
+PeerJS offers a hosted signaling server (free tier). Simpler API than raw WebRTC, but depends on PeerJS's cloud infrastructure and requires a `peerjs` dependency. Trystero with NOSTR is preferred because it has no single point of failure and no dependency on a commercial service's free tier.
 
 ### Self-hosted signaling server
 
-A tiny WebSocket server that only brokers ICE SDP exchanges (no data stored). More private and reliable than public infrastructure, but reintroduces a hosting requirement — contradicting the main goal.
+A tiny WebSocket server (~50 lines of Node.js) that only brokers ICE SDP exchanges — no annotation data stored, no database. This is the highest-privacy option (fully GDPR-controllable, no third-party infrastructure) but reintroduces a hosting requirement, contradicting the zero-server goal. Recommended as an opt-in alternative for privacy-sensitive enterprise deployments.
 
 ### Yjs / CRDTs
 
