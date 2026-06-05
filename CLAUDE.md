@@ -40,7 +40,7 @@ The client distributes as a **single JS file**. The server is optional — omit 
 <script src="annotate.js" data-site-id="your-site-id"></script>
 
 <!-- Production (self-hosted server, minified build) -->
-<script src="https://your-server.example.com/assets/annotate.min.js"
+<script src="https://your-server.example.com/annotate.min.js"
         data-site-id="your-site-id"
         data-sync-url="https://your-server.example.com"></script>
 ```
@@ -48,7 +48,7 @@ The client distributes as a **single JS file**. The server is optional — omit 
 Everything (IndexedDB layer, anchor serialization, sync layer, UI, CSS) is inlined into the IIFE.
 Injects a collapsible right sidebar + floating comment button. All CSS embedded via `document.createElement('style')`.
 
-`assets/annotate.min.js` is a generated artifact — run `npm run build` to produce it. It is gitignored
+`annotate.min.js` is a generated artifact — run `npm run build` to produce it. It is gitignored
 and never committed. The Dockerfile builds it automatically in stage 1.
 
 ## Running the Server
@@ -58,18 +58,18 @@ and never committed. The Dockerfile builds it automatically in stage 1.
 ```bash
 node --version   # must be >= 23
 npm install
-npm run build    # produces assets/annotate.min.js (required for production embeds)
+npm run build    # produces annotate.min.js (required for production embeds)
 npm start        # → http://localhost:3000/demo/demo.html
 ```
 
-The server serves the project root via `express.static`, so `/assets/annotate.min.js` and `/demo/*`
+The server serves the project root via `express.static`, so `/annotate.min.js` and `/demo/*`
 are available immediately after `npm start`.
 
 ### npm scripts
 
 | Script | What it does |
 |---|---|
-| `npm run build` | Minify source → `assets/annotate.min.js` via terser |
+| `npm run build` | Minify source → `annotate.min.js` via terser |
 | `npm start` | Start Express server on `PORT` (default 3000) |
 | `npm run kill-port` | Free port 3000 if already in use |
 | `npm run pm2:start` | Start with PM2 process manager |
@@ -304,7 +304,7 @@ GET includes soft-deleted threads so deletes propagate to other clients on pull.
 - ✅ Multi-user: 30s poll + visibility-change refresh
 
 ### Phase D — Build & Deploy ✅
-- ✅ `npm run build` — terser minifies `assets/js/annotate.js` → `assets/annotate.min.js`
+- ✅ `npm run build` — terser minifies `assets/js/annotate.js` → `annotate.min.js`
 - ✅ `Dockerfile` — multi-stage build; lean Node 23 Alpine runtime image
 - ✅ `docker-compose.yml` — named SQLite volume, `restart: unless-stopped`, PORT override
 - ✅ `ecosystem.config.js` — PM2 config; `instances: 1` enforced for SQLite write-lock safety

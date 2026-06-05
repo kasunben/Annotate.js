@@ -14,7 +14,7 @@ RUN npm install --omit=dev
 COPY server/ server/
 COPY assets/ assets/
 COPY demo/ demo/
-COPY --from=builder /app/assets/annotate.min.js assets/
+COPY --from=builder /app/annotate.min.js ./
 RUN mkdir -p server/data
 EXPOSE 3000
 VOLUME /app/server/data

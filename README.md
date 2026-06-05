@@ -117,7 +117,7 @@ Annotate.js/
 
 | Script | Description |
 |--------|-------------|
-| `npm run build` | Minify `assets/js/annotate.js` → `assets/annotate.min.js` |
+| `npm run build` | Minify `assets/js/annotate.js` → `annotate.min.js` |
 | `npm start` | Start the server on port 3000 |
 | `npm run kill-port` | Free port 3000 if already in use |
 | `npm run pm2:start` | Start with PM2 (requires `npm i -g pm2`) |
@@ -229,7 +229,7 @@ Anyone can clone this repo, build the minified library, and deploy the server.
 ```bash
 git clone https://github.com/kasunben/Annotate.js
 npm install
-npm run build   # → assets/annotate.min.js
+npm run build   # → annotate.min.js
 ```
 
 ### 2a. Deploy with Docker (recommended for PaaS / containerized VPS)
@@ -260,7 +260,7 @@ Point `src` at your deployed server and you're done:
 
 ```html
 <script
-  src="https://your-server.example.com/assets/annotate.min.js"
+  src="https://your-server.example.com/annotate.min.js"
   data-site-id="my-site"
   data-sync-url="https://your-server.example.com">
 </script>
