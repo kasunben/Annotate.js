@@ -14,6 +14,7 @@ Annotate.js/
 │   ├── routes/threads.js    # 8 REST endpoints
 │   └── data/                # annotate.db lives here (gitignored)
 ├── package.json             # express + cors only (node:sqlite is built-in)
+├── README.md
 └── docs/annotate-js-concept.md  # Phase 1 spec & architecture decisions
 ```
 
@@ -227,6 +228,7 @@ Delta DOM update after every pull — no full page reload:
 | POST | `/threads/:id/replies` | `{ reply }` | Append reply |
 | PATCH | `/threads/:id/replies/:replyId` | `{ body, updatedAt }` | Edit reply |
 | DELETE | `/threads/:id/replies/:replyId` | — | Soft-delete reply (`deleted: true`) |
+| DELETE | `/threads` | `?siteId=` | Hard-delete all threads for a site (Settings → Clear all) |
 
 All mutation endpoints return the full updated Thread object so the client can `dbSaveThread` directly.
 GET includes soft-deleted threads so deletes propagate to other clients on pull.
@@ -282,6 +284,7 @@ Test checklist for any change:
 - Kill server → User A can still annotate (IDB saves, `dirty=true`)
 - Restart server → User A's offline annotations push on next load (`flushDirtyThreads`)
 - Remove `data-sync-url` → page works exactly as before (no fetch calls, no regressions)
+- Settings → Clear all → sidebar empties immediately, stays empty after reload
 
 ## Key Implementation Notes
 
@@ -293,3 +296,5 @@ Test checklist for any change:
 - **`dirty` flag** — client-only; never stored in SQLite; cleared after a successful `syncThread` push
 - **`_renderedThreadIds`** — `Set` tracking IDs of active cards in `sidebarBody`; prevents double-render on first pull after `loadThreads`
 - **`_lastRenderedAt`** — stored on each card DOM element; `_rerenderAfterPull` skips re-render if `updatedAt` hasn't changed
+- **`updatedAt` on every mutation** — all mutations (reply add/edit/delete, resolve, thread delete) must bump `t.updatedAt = new Date().toISOString()` before saving; the `?since` incremental pull filters by `updated_at > _lastSync`, so any mutation that skips this is invisible to other users
+- **`dbClearAll(siteId, db)`** — pass the open `_db` connection to clear stores via `readwrite` transaction instead of `deleteDatabase`; `deleteDatabase` is blocked by the tab's own open connection, causing the reload to never fire; falls back to `deleteDatabase` (with `onblocked → resolve` safety net) when no connection is available
