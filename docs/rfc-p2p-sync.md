@@ -140,7 +140,7 @@ Server files (`server/`) are **not touched**. The P2P mode is purely additive.
 | | Server sync | P2P (Trystero) |
 |---|---|---|
 | **Persistence** | SQLite — survives all browsers closing | IDB only — latecomers sync from an online peer, not a database |
-| **Privacy** | Annotations stored server-side | Annotations never leave the browser |
+| **Privacy** | Annotations stored server-side | Annotation content never leaves the browser (DTLS E2E); room name + IPs visible to NOSTR relay operators |
 | **Hosting cost** | VPS / container required | Zero |
 | **Offline writes** | `dirty` flag, flushed on next server contact | Queued in IDB; broadcast when a peer is online |
 | **Conflict resolution** | Last-write-wins (server clock) | Last-write-wins (client clocks) |
@@ -155,6 +155,56 @@ The main weakness of P2P mode: if User A annotates while all other peers are off
 **This is not ideal for:** async annotation over days or weeks where users work independently
 
 For async workflows, the server sync path remains the better choice.
+
+---
+
+## Security Model
+
+### What WebRTC already protects
+
+WebRTC data channels are **mandatorily DTLS-encrypted** — this cannot be disabled and requires no configuration. DTLS is negotiated end-to-end between the two browsers. Even when a TURN server is used to relay traffic (common behind strict NAT), the TURN server forwards encrypted packets it cannot read. Annotation content is therefore protected from:
+
+- NOSTR relay operators (signaling only; no annotation data passes through)
+- Network observers and ISPs
+- TURN relay servers
+
+No additional application-level encryption is needed to protect annotation content in transit.
+
+### What IS visible to third parties
+
+| Data | Visible to | Notes |
+|---|---|---|
+| Annotation content | Peers in the room only | DTLS-encrypted end-to-end |
+| Room name | NOSTR relay operators | Plain text in signaling messages |
+| IP addresses | NOSTR relay operators | Present in ICE candidates |
+| Ephemeral peer public keys | NOSTR relay operators | Trystero-generated per session; not linked to identity |
+
+### Room name as access control
+
+The room name (`data-room-id`) is the only access control mechanism for P2P mode. **Anyone who knows the room name can join the room and read all annotations.** This makes the room name effectively a shared password.
+
+**Guidance for site operators:**
+
+- Use a **long random string** for `data-room-id` — a UUID v4 or a 128-bit hex token is appropriate. Do not use human-readable or guessable names like `"my-project"` or `"acme-docs"`.
+- Treat the room ID as a secret. Do not embed it in public HTML — generate it server-side and inject it only for authenticated users, or distribute it via a secure channel.
+- Rotating the room ID revokes access for anyone who had the old value.
+
+Example of a safe room ID:
+
+```html
+<script src="annotate.min.js"
+        data-site-id="my-site"
+        data-room-id="f3a9c271-8d4e-4b1a-9c3f-d17b2e5a08cc">
+</script>
+```
+
+### Multi-peer rooms (3+ users)
+
+Each WebRTC connection in a room is DTLS-encrypted pairwise. Application-level encryption with a shared secret derived from the room ID would not add meaningful protection — every peer in the room already knows the room ID and is already trusted by being there. The trust boundary is room membership, not encryption.
+
+### When to use self-hosted signaling instead
+
+If the room name and user IP addresses must not be visible to any third party (e.g. internal enterprise annotation of confidential documents), use the **self-hosted signaling server** alternative (see Alternatives Considered). It is a tiny WebSocket server (~50 lines) that brokers only ICE SDP messages, stores nothing, and is fully under your control. This satisfies strict GDPR data minimisation requirements where NOSTR relay operators cannot be included in a Data Processing Agreement.
 
 ---
 
