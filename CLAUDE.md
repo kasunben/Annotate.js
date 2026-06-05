@@ -6,17 +6,21 @@ Lightweight vanilla JS library that adds inline annotation and threaded comments
 
 ```
 Annotate.js/
-├── assets/js/annotate.js   # Entire library (~700 lines, single IIFE)
+├── assets/js/annotate.js   # Entire library (~800 lines, single IIFE)
+├── assets/js/db.js         # IndexedDB wrapper (planned)
+├── assets/js/anchor.js     # Range serialization / restore (planned)
 ├── demo/demo.html           # Manual test harness / integration example
 └── docs/annotate-js-concept.md  # Phase 1 spec & architecture decisions
 ```
 
-No `package.json`, no build tools, no framework — intentional. Distribute as a plain JS file.
+No `package.json`, no build tools, no framework — intentional. Distribute as plain JS files.
 
 ## Integration
 
 ```html
-<script src="annotate.js" data-site-id="your-site-id"></script>
+<script src="assets/js/db.js"></script>
+<script src="assets/js/anchor.js"></script>
+<script src="assets/js/annotate.js" data-site-id="your-site-id"></script>
 ```
 
 Injects a collapsible right sidebar + floating comment button. All CSS embedded in JS via `document.createElement('style')`.
@@ -24,73 +28,193 @@ Injects a collapsible right sidebar + floating comment button. All CSS embedded 
 ## Tech Stack
 
 - **Vanilla ES6+ JavaScript** — no React, Vue, etc.
-- **Browser APIs only** — DOM, Text Selection, Range, localStorage (wiring in progress)
-- **No build tooling** — edit `assets/js/annotate.js` directly, open `demo/demo.html` to test
+- **Browser APIs only** — DOM, Text Selection, Range, IndexedDB, localStorage
+- **No build tooling** — edit source files directly, open `demo/demo.html` to test
 
-## Current State
+---
 
-### Done
-- Collapsible sidebar UI (right-aligned, 320px)
-- Floating comment button on text selection
-- Text highlighting via `<mark>` elements
-- Annotation cards with quote, note, avatar, timestamp
-- Resolve, Edit, Delete actions (three-dot menu)
-- Threaded replies per annotation
+## Canonical Terminology
 
-### Not Yet Implemented (frontend)
-- **LocalStorage persistence** — annotations lost on reload; `localStorage` is available but not wired up
-- **Display name UI** — hardcoded "Anonymous"; needs localStorage read/write + input form
-- `data-site-id` attribute is read from the script tag but never used yet
+Use these terms consistently in code, comments, and future API design:
 
-### Not Started (backend — deferred)
-- Node.js + SQLite REST API (5 endpoints: list, create, reply, resolve, delete)
-- API integration in the frontend client
+| Concept | Canonical term | Notes |
+|---|---|---|
+| Top-level annotation unit | **Thread** | Old names: annotation, card, node |
+| Text highlighted on the page | **Highlight** | DOM: `<mark class="annotate-highlight">` |
+| Selected text shown in quote block | **quote** (field) | Old: selectedText |
+| Serialized DOM position for reload | **Anchor** | Old: range (Range is ephemeral) |
+| Root text of a Thread | **body** (field) | Old: note, comment |
+| Response to a Thread | **Reply** | Unchanged |
+| Person who wrote a Thread/Reply | **Author** | Old: Anonymous (was hardcoded) |
+| Script tag identifier | **siteId** | From `data-site-id` attribute |
+| Full page URL being annotated | **pageUrl** | `window.location.href` normalized |
+| UI container for quote+body+replies | **ThreadCard** | UI term only, not a data concept |
 
-## Development Approach
+---
 
-**Finish frontend with offline support first, then backend.**
+## Data Model
 
-"Offline support" here means full LocalStorage persistence so annotations survive page reloads without any server. The library should be fully usable as a standalone local tool before backend sync is introduced.
+### Thread
+```js
+{
+  id:          string,   // UUID v4, client-generated
+  siteId:      string,   // from data-site-id
+  pageUrl:     string,   // window.location.href (no hash)
 
-Frontend offline milestones:
-1. Persist all annotations (quote, note, highlight range, timestamp, author) to localStorage keyed by `data-site-id` + `window.location.href`
-2. Load and re-render saved annotations on page load (re-apply highlights + populate sidebar)
-3. Display name — read from localStorage, prompt user on first annotation, save for future use
-4. Persist resolve/edit/delete actions to localStorage
-5. Handle edge cases: DOM changes that break highlight anchoring, duplicate highlights on reload
+  quote:       string,   // snapshot of selected text
+  anchor: {
+    xpath:       string, // XPath to text node
+    startOffset: number,
+    endOffset:   number,
+  },
 
-Backend sync comes after all of the above works reliably offline.
+  body:        string,
+  author:      string,
+  createdAt:   string,   // ISO 8601
+  updatedAt:   string,
+
+  resolved:    boolean,
+  resolvedAt:  string | null,
+  resolvedBy:  string | null,
+
+  replies: [{
+    id:        string,
+    body:      string,
+    author:    string,
+    createdAt: string,
+    updatedAt: string | null,
+    deleted:   boolean,        // soft-delete
+  }],
+
+  dirty:       boolean,        // true = not yet synced to server
+  deletedAt:   string | null,  // soft-delete
+}
+```
+
+### ActivityEntry
+```js
+{
+  id:        string,
+  siteId:    string,
+  pageUrl:   string,
+  type:      'thread_created' | 'thread_resolved' | 'thread_deleted'
+           | 'thread_edited'  | 'reply_added'     | 'reply_edited'
+           | 'reply_deleted',
+  threadId:  string,
+  replyId:   string | null,
+  actor:     string,
+  timestamp: string,   // ISO 8601
+  snapshot:  string,   // short human summary e.g. "replied: 'great point'"
+}
+```
+
+### UserConfig (localStorage only)
+```js
+{ displayName: string, configuredAt: string }
+```
+
+---
+
+## Storage Architecture
+
+| Data | Store | Why |
+|---|---|---|
+| Threads | **IndexedDB** | Indexed by `[siteId, pageUrl]`, atomic updates, no size limit |
+| Activity log | **IndexedDB** | Append-only, unbounded growth, queryable by timestamp |
+| User config | **localStorage** | Tiny, simple, global |
+
+**DB name:** `annotate-{siteId}` · **Version:** 1
+
+| Object store | Key | Indexes |
+|---|---|---|
+| `threads` | `id` | `[pageUrl]`, `[pageUrl, resolved]`, `createdAt` |
+| `activity` | `id` | `[pageUrl]`, `timestamp` |
+
+---
+
+## Sidebar Tabs
+
+| Tab | Shows | Scope |
+|---|---|---|
+| **Threads** | Active threads (`resolved=false, deletedAt=null`) | current pageUrl |
+| **Resolved** | Resolved threads (`resolved=true, deletedAt=null`) | current pageUrl |
+| **Activity** | ActivityEntry list, newest first | current pageUrl |
+| **Settings** | displayName input, clear-data option | global |
+
+---
+
+## Highlight Re-anchoring
+
+`Range` objects are ephemeral. On save, serialize to a stable `Anchor`:
+```js
+// Serialize (anchor.js)
+anchor = { xpath: getXPath(range.startContainer), startOffset, endOffset }
+
+// Restore on page load (anchor.js)
+range = document.evaluate(anchor.xpath) → set offsets → reconstruct Range → apply <mark>
+```
+If XPath no longer resolves (DOM changed), show Thread in sidebar with a
+"highlight unavailable" badge rather than dropping it silently.
+
+---
+
+## Implementation Phases
+
+### Phase A — Persistence (current focus)
+1. `db.js` — IndexedDB wrapper: `openDB`, `getThreads`, `saveThread`, `updateThread`, `deleteThread`, `addActivity`, `getActivity`
+2. `anchor.js` — `serializeRange(range) → Anchor`, `restoreRange(anchor) → Range`
+3. Wire `annotate.js`: save Thread on note submit, update on resolve/edit/delete/reply, load + re-render on page load
+4. Display name prompt on first annotation, persist to localStorage
+
+### Phase B — Tab views
+- Resolved tab: read-only ThreadCards filtered by `resolved=true`
+- Activity tab: render ActivityEntry list
+- Settings tab: displayName field + clear-data
+
+### Phase C — Backend sync (deferred)
+- Node.js + SQLite REST API (5 endpoints)
+- Sync layer: push `dirty=true` records, pull newer than last-sync timestamp
+
+---
+
+## Future API Mapping
+
+| Local action | REST endpoint |
+|---|---|
+| Save Thread | `POST /threads` |
+| Edit Thread body | `PATCH /threads/:id` |
+| Resolve Thread | `PATCH /threads/:id/resolve` |
+| Delete Thread | `DELETE /threads/:id` |
+| Add Reply | `POST /threads/:id/replies` |
+| Edit Reply | `PATCH /threads/:id/replies/:replyId` |
+| Delete Reply | `DELETE /threads/:id/replies/:replyId` |
+
+---
 
 ## Testing
 
 No automated tests. Use `demo/demo.html` as the manual test harness:
 
 ```bash
-open demo/demo.html
-# or serve locally to avoid file:// quirks:
+# Must serve over HTTP — IndexedDB and file:// don't mix well
 python3 -m http.server 8080
 # then open http://localhost:8080/demo/demo.html
 ```
 
 Test checklist for any change:
 - Select text → comment button appears, positioned correctly
-- Add annotation → highlight appears, card created in sidebar
-- Reload page → annotations reload correctly (once offline persistence is done)
-- Edit, delete, resolve each work correctly
-- Replies thread correctly under parent annotation
+- Add Thread → Highlight appears, ThreadCard created in sidebar
+- Reload page → Threads reload, Highlights re-applied
+- Edit, delete, resolve each work and persist
+- Replies thread correctly, persist across reload
+- Resolved threads appear in Resolved tab, not Threads tab
+- Activity tab shows all events in order
 - Sidebar toggle opens/closes
 - No JS errors in console
 
-## Key Implementation Details
+## Key Implementation Notes
 
-- **IIFE pattern** — everything scoped inside `(function() { ... })()` to avoid global pollution
-- **Highlight anchoring** — `Range` serialization strategy needed for reload; currently uses live `Range` objects (ephemeral)
-- **Card positioning** — `getBoundingClientRect()` relative to highlighted text; recalculate on scroll/resize if needed
-- **`data-site-id`** — read via `document.currentScript.dataset.siteId`; use as the localStorage namespace key
-
-## Planned Backend (future, not current focus)
-
-- Node.js + SQLite, self-hosted
-- 5 REST endpoints: `list`, `create`, `reply`, `resolve`, `delete`
-- Comments keyed by: `site_id` + page URL
-- No auth in Phase 1 (display name only)
+- **IIFE pattern** — all files scoped in `(function() { ... })()` to avoid globals
+- **`siteId`** — read via `document.currentScript.dataset.siteId`; used as IDB namespace
+- **Card positioning** — `_anchorTop` on each DOM element; `repositionCards()` re-evaluates on every height change via `ResizeObserver`
+- **Soft-delete** — `deletedAt` field on Threads and `deleted` flag on Replies; never hard-delete locally so sync can propagate removals to the server later
