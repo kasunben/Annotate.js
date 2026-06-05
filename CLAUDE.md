@@ -6,27 +6,54 @@ Lightweight vanilla JS library that adds inline annotation and threaded comments
 
 ```
 Annotate.js/
-├── assets/js/annotate.js   # Entire library (single IIFE — DB layer + anchor + UI all inlined)
+├── assets/js/annotate.js   # Entire library (single IIFE — DB layer + anchor + sync + UI all inlined)
 ├── demo/demo.html           # Manual test harness / integration example
+├── server/
+│   ├── index.js             # Express entry point; also serves static files
+│   ├── db.js                # node:sqlite setup, schema migrations, rowToThread/threadToRow
+│   ├── routes/threads.js    # 8 REST endpoints
+│   └── data/                # annotate.db lives here (gitignored)
+├── package.json             # express + cors only (node:sqlite is built-in)
 └── docs/annotate-js-concept.md  # Phase 1 spec & architecture decisions
 ```
 
-No `package.json`, no build tools, no framework — intentional. Distributes as a **single JS file**.
+The client distributes as a **single JS file**. The server is optional — omit `data-sync-url` to run offline-only.
 
 ## Integration
 
 ```html
+<!-- Offline-only (IDB only, no server needed) -->
 <script src="annotate.js" data-site-id="your-site-id"></script>
+
+<!-- With multi-user sync -->
+<script src="annotate.js"
+        data-site-id="your-site-id"
+        data-sync-url="https://your-server.example.com"></script>
 ```
 
-One tag. Everything (IndexedDB layer, anchor serialization, UI, CSS) is inlined into the IIFE.
+Everything (IndexedDB layer, anchor serialization, sync layer, UI, CSS) is inlined into the IIFE.
 Injects a collapsible right sidebar + floating comment button. All CSS embedded via `document.createElement('style')`.
+
+## Running the Server
+
+```bash
+npm install
+npm start
+# open http://localhost:3000/demo/demo.html
+```
+
+The server also serves the demo and assets via `express.static`, so `python3 -m http.server` is no longer needed.
 
 ## Tech Stack
 
+**Client**
 - **Vanilla ES6+ JavaScript** — no React, Vue, etc.
-- **Browser APIs only** — DOM, Text Selection, Range, IndexedDB, localStorage
-- **No build tooling** — edit source files directly, open `demo/demo.html` to test
+- **Browser APIs only** — DOM, Text Selection, Range, IndexedDB, localStorage, fetch
+
+**Server**
+- **Node.js + Express** — lightweight REST API
+- **`node:sqlite`** — Node's built-in SQLite module (Node ≥ 22.5), no native compilation
+- **No ORM** — raw SQL prepared statements
 
 ---
 
@@ -83,7 +110,7 @@ Use these terms consistently in code, comments, and future API design:
     deleted:   boolean,        // soft-delete
   }],
 
-  dirty:       boolean,        // true = not yet synced to server
+  dirty:       boolean,        // true = not yet synced to server (client-only field)
   deletedAt:   string | null,  // soft-delete
 }
 ```
@@ -105,6 +132,8 @@ Use these terms consistently in code, comments, and future API design:
 }
 ```
 
+ActivityEntries are **local-only** — not synced to the server. Each browser keeps its own audit trail.
+
 ### UserConfig (localStorage only)
 ```js
 { displayName: string, configuredAt: string }
@@ -116,16 +145,18 @@ Use these terms consistently in code, comments, and future API design:
 
 | Data | Store | Why |
 |---|---|---|
-| Threads | **IndexedDB** | Indexed by `[siteId, pageUrl]`, atomic updates, no size limit |
-| Activity log | **IndexedDB** | Append-only, unbounded growth, queryable by timestamp |
+| Threads | **IndexedDB** (primary) + **SQLite** (server) | IDB is the offline working store; server is canonical for multi-user |
+| Activity log | **IndexedDB only** | Local audit trail; no server sync needed |
 | User config | **localStorage** | Tiny, simple, global |
 
-**DB name:** `annotate-{siteId}` · **Version:** 1
+**IDB name:** `annotate-{siteId}` · **Version:** 1
 
 | Object store | Key | Indexes |
 |---|---|---|
-| `threads` | `id` | `[pageUrl]`, `[pageUrl, resolved]`, `createdAt` |
+| `threads` | `id` | `[pageUrl]`, `createdAt` |
 | `activity` | `id` | `[pageUrl]`, `timestamp` |
+
+**SQLite** (`server/data/annotate.db`): single `threads` table. `anchor` and `replies` stored as JSON columns. `dirty` field is client-only and never written to SQLite.
 
 ---
 
@@ -144,10 +175,10 @@ Use these terms consistently in code, comments, and future API design:
 
 `Range` objects are ephemeral. On save, serialize to a stable `Anchor`:
 ```js
-// Serialize (anchor.js)
+// Serialize
 anchor = { xpath: getXPath(range.startContainer), startOffset, endOffset }
 
-// Restore on page load (anchor.js)
+// Restore on page load
 range = document.evaluate(anchor.xpath) → set offsets → reconstruct Range → apply <mark>
 ```
 If XPath no longer resolves (DOM changed), show Thread in sidebar with a
@@ -155,47 +186,82 @@ If XPath no longer resolves (DOM changed), show Thread in sidebar with a
 
 ---
 
-## Implementation Phases
+## Sync Architecture
 
-### Phase A — Persistence (current focus)
-1. ✅ IndexedDB layer — inlined into `annotate.js`: `openDB`, `dbGetThreads`, `dbGetResolvedThreads`, `dbSaveThread`, `dbDeleteThread`, `dbAddActivity`, `dbGetActivity`, `dbClearAll`, `generateId`, `normalizeUrl`
-2. ✅ Anchor layer — inlined into `annotate.js`: `serializeRange(range) → Anchor`, `restoreRange(anchor) → Range|null`
-3. ✅ Wire `annotate.js`: save Thread on note submit, update on resolve/edit/delete/reply, load + re-render on page load
-4. ✅ Display name prompt on first annotation, persist to localStorage
+Sync is **opt-in** via `data-sync-url`. When absent, the library behaves exactly as before (IDB-only).
 
-### Phase B — Tab views ✅
-- ✅ Resolved tab: read-only ThreadCards, resolved highlights dimmed on page (`.is-resolved`)
-- ✅ Activity tab: chronological ActivityEntry feed with color-coded dots
-- ✅ Settings tab: displayName input (auto-saves), clear-data button
+### Strategy
 
-### Phase C — Backend sync (deferred)
-- Node.js + SQLite REST API (5 endpoints)
-- Sync layer: push `dirty=true` records, pull newer than last-sync timestamp
+| Trigger | Action |
+|---|---|
+| Every local mutation | `syncThread(t)` — fire-and-forget `POST /threads` (upsert) |
+| Page load (after `loadThreads`) | `pullThreads()` — full pull; `flushDirtyThreads()` — push any offline mutations |
+| Every 30 seconds | `pullThreads()` — incremental pull via `?since=_lastSync` |
+| Tab becomes visible | `pullThreads()` — incremental pull |
+
+### Conflict resolution
+
+**Last-write-wins by `updatedAt`.** Server wins for non-dirty local records on pull. Local dirty records are skipped during pull and pushed on the next `syncThread` or `flushDirtyThreads` call.
+
+`_lastSync` is set to the max `updatedAt` seen in each server response (not client clock), avoiding clock skew issues.
+
+### `_rerenderAfterPull(serverThreads)`
+
+Delta DOM update after every pull — no full page reload:
+- **Deleted** thread: remove card from sidebar + unwrap `<mark>`
+- **Resolved** thread (from another user): dim active card or apply `.is-resolved` mark
+- **New** active thread: `restoreRange` + `renderThreadCard`
+- **Updated** active thread: `_renderSavedCard` — skipped if a composer textarea is open (open-composer guard prevents wiping a draft)
 
 ---
 
-## Future API Mapping
+## REST API
 
-| Local action | REST endpoint |
-|---|---|
-| Save Thread | `POST /threads` |
-| Edit Thread body | `PATCH /threads/:id` |
-| Resolve Thread | `PATCH /threads/:id/resolve` |
-| Delete Thread | `DELETE /threads/:id` |
-| Add Reply | `POST /threads/:id/replies` |
-| Edit Reply | `PATCH /threads/:id/replies/:replyId` |
-| Delete Reply | `DELETE /threads/:id/replies/:replyId` |
+| Method | Path | Body | Action |
+|---|---|---|---|
+| GET | `/threads` | `?siteId&pageUrl[&since]` | All threads for page; `since` enables incremental pull |
+| POST | `/threads` | full Thread object | Upsert (`INSERT OR REPLACE`) |
+| PATCH | `/threads/:id` | `{ body, updatedAt }` | Edit body |
+| PATCH | `/threads/:id/resolve` | `{ resolvedBy, resolvedAt }` | Resolve |
+| DELETE | `/threads/:id` | `{ deletedAt }` | Soft-delete |
+| POST | `/threads/:id/replies` | `{ reply }` | Append reply |
+| PATCH | `/threads/:id/replies/:replyId` | `{ body, updatedAt }` | Edit reply |
+| DELETE | `/threads/:id/replies/:replyId` | — | Soft-delete reply (`deleted: true`) |
+
+All mutation endpoints return the full updated Thread object so the client can `dbSaveThread` directly.
+GET includes soft-deleted threads so deletes propagate to other clients on pull.
+
+---
+
+## Implementation Phases
+
+### Phase A — Persistence ✅
+1. ✅ IndexedDB layer — inlined into `annotate.js`
+2. ✅ Anchor layer — `serializeRange` / `restoreRange`
+3. ✅ Wire mutations → IDB, load + re-render on page load
+4. ✅ Display name prompt on first annotation
+
+### Phase B — Tab views ✅
+- ✅ Resolved tab, Activity tab, Settings tab
+
+### Phase C — Backend sync ✅
+- ✅ Node.js + Express + `node:sqlite` REST server (`server/`)
+- ✅ Sync layer inlined into `annotate.js`: `syncThread`, `pullThreads`, `flushDirtyThreads`, `_rerenderAfterPull`
+- ✅ Multi-user: 30s poll + visibility-change refresh
+
+### Phase D — Future work
+- Authentication / per-user access control
+- Server-side activity log (currently local-only)
+- Real-time push (SSE or WebSocket) to replace polling
+- Deploy target (Fly.io, Railway, etc.)
 
 ---
 
 ## Testing
 
-No automated tests. Use `demo/demo.html` as the manual test harness:
-
 ```bash
-# Must serve over HTTP — IndexedDB and file:// don't mix well
-python3 -m http.server 8080
-# then open http://localhost:8080/demo/demo.html
+npm start
+# open http://localhost:3000/demo/demo.html in two browser windows
 ```
 
 Test checklist for any change:
@@ -209,9 +275,21 @@ Test checklist for any change:
 - Sidebar toggle opens/closes
 - No JS errors in console
 
+**Multi-user sync checklist:**
+- User A annotates → User B sees it within 30 s (or on tab focus)
+- User A resolves → User B's card dims within 30 s
+- User A deletes → User B's highlight unwraps within 30 s
+- Kill server → User A can still annotate (IDB saves, `dirty=true`)
+- Restart server → User A's offline annotations push on next load (`flushDirtyThreads`)
+- Remove `data-sync-url` → page works exactly as before (no fetch calls, no regressions)
+
 ## Key Implementation Notes
 
-- **IIFE pattern** — all files scoped in `(function() { ... })()` to avoid globals
-- **`siteId`** — read via `document.currentScript.dataset.siteId`; used as IDB namespace
+- **IIFE pattern** — all client code scoped in `(function() { ... })()` to avoid globals
+- **`siteId`** — read via `document.currentScript.dataset.siteId`; IDB namespace + server scope
+- **`syncUrl`** — read via `document.currentScript.dataset.syncUrl`; `null` = sync disabled
 - **Card positioning** — `_anchorTop` on each DOM element; `repositionCards()` re-evaluates on every height change via `ResizeObserver`
-- **Soft-delete** — `deletedAt` field on Threads and `deleted` flag on Replies; never hard-delete locally so sync can propagate removals to the server later
+- **Soft-delete** — `deletedAt` on Threads, `deleted` on Replies; never hard-delete so deletes propagate to other clients via GET
+- **`dirty` flag** — client-only; never stored in SQLite; cleared after a successful `syncThread` push
+- **`_renderedThreadIds`** — `Set` tracking IDs of active cards in `sidebarBody`; prevents double-render on first pull after `loadThreads`
+- **`_lastRenderedAt`** — stored on each card DOM element; `_rerenderAfterPull` skips re-render if `updatedAt` hasn't changed

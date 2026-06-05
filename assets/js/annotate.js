@@ -260,9 +260,11 @@
 
   // ── Runtime state ─────────────────────────────────────────────────────────
   // document.currentScript is only available during synchronous execution.
-  const _siteId  = (document.currentScript && document.currentScript.dataset.siteId) || 'default';
-  const _pageUrl = normalizeUrl(window.location.href);
-  let   _db      = null; // IDBDatabase — set by init(); null = memory-only mode
+  const _siteId   = (document.currentScript && document.currentScript.dataset.siteId) || 'default';
+  const _pageUrl  = normalizeUrl(window.location.href);
+  const _syncUrl  = (document.currentScript && document.currentScript.dataset.syncUrl) || null;
+  let   _db       = null; // IDBDatabase — set by init(); null = memory-only mode
+  let   _lastSync = null; // ISO 8601 — max updatedAt seen from server; drives incremental pulls
 
   console.log('Annotate.js loaded — site:', _siteId);
 
@@ -895,7 +897,8 @@
   const _panelSettings   = document.getElementById('annotate-panel-settings');
 
   // threadId → <mark> element; used by Resolved tab delete to remove highlight
-  const _threadMarks = {};
+  const _threadMarks      = {};
+  const _renderedThreadIds = new Set(); // IDs of active thread cards currently in sidebarBody
 
   // --- Tab switching ---
   const _allPanels   = [sidebarBody, _panelResolved, _panelActivity, _panelSettings];
@@ -1142,6 +1145,7 @@
             const r = t.replies.find(function (x) { return x.id === replyId; });
             if (r) { r.body = updated; r.updatedAt = new Date().toISOString(); t.dirty = true; }
             return dbSaveThread(_db, t).then(function () {
+              syncThread(t);
               return dbAddActivity(_db, makeActivity('reply_edited', t.id, replyId, r ? r.author : '', 'edited reply'));
             });
           }).catch(function (e) { console.warn('Annotate.js: reply edit persist failed', e); });
@@ -1170,6 +1174,7 @@
           const r = t.replies.find(function (x) { return x.id === replyId; });
           if (r) { r.deleted = true; t.dirty = true; }
           return dbSaveThread(_db, t).then(function () {
+            syncThread(t);
             return dbAddActivity(_db, makeActivity('reply_deleted', t.id, replyId, r ? r.author : '', 'deleted reply'));
           });
         }).catch(function (e) { console.warn('Annotate.js: reply delete persist failed', e); });
@@ -1183,6 +1188,7 @@
    * Called both after a fresh save AND when loading threads from IDB on page load.
    */
   function _renderSavedCard(card, thread) {
+    card._lastRenderedAt = thread.updatedAt;
     const cardBody = card.querySelector('.annotate-card-body');
     cardBody.innerHTML = `
       <div class="annotate-meta">
@@ -1219,6 +1225,7 @@
           const who = getAuthor();
           t.resolved = true; t.resolvedAt = new Date().toISOString(); t.resolvedBy = who; t.dirty = true;
           return dbSaveThread(_db, t).then(function () {
+            syncThread(t);
             return dbAddActivity(_db, makeActivity('thread_resolved', t.id, null, who, 'resolved thread'));
           });
         }).catch(function (e) { console.warn('Annotate.js: resolve persist failed', e); });
@@ -1254,6 +1261,7 @@
             if (!t) return;
             t.body = updated; t.updatedAt = new Date().toISOString(); t.dirty = true;
             return dbSaveThread(_db, t).then(function () {
+              syncThread(t);
               return dbAddActivity(_db, makeActivity('thread_edited', t.id, null, t.author, 'edited: \'' + updated.slice(0, 40) + '\''));
             });
           }).catch(function (e) { console.warn('Annotate.js: edit persist failed', e); });
@@ -1277,6 +1285,7 @@
       if (_db) {
         dbDeleteThread(_db, thread.id)
           .then(function () {
+            dbGetThread(_db, thread.id).then(function (t) { if (t) syncThread(t); });
             return dbAddActivity(_db, makeActivity('thread_deleted', thread.id, null, getAuthor(), 'deleted thread'));
           })
           .catch(function (e) { console.warn('Annotate.js: delete persist failed', e); });
@@ -1319,6 +1328,8 @@
     const card = document.createElement('div');
     card.className = 'annotate-card';
     card._threadId = thread.id;
+    card.dataset.threadId = thread.id;
+    _renderedThreadIds.add(thread.id);
 
     const unavailableBadge = mark ? '' : ' <span style="font-size:10px;color:#aaa;font-style:normal;">(highlight unavailable)</span>';
     card.innerHTML = `
@@ -1449,6 +1460,145 @@
     });
   }
 
+  // ── Sync layer ────────────────────────────────────────────────────────────
+  //
+  // All functions are no-ops when _syncUrl is null, so existing offline
+  // behaviour is preserved when data-sync-url is absent from the script tag.
+
+  /** Unwrap a <mark> element, leaving its text children in place */
+  function _unwrapMark(mark) {
+    var p = mark.parentNode;
+    if (p) { while (mark.firstChild) p.insertBefore(mark.firstChild, mark); p.removeChild(mark); }
+  }
+
+  /**
+   * Push a single thread to the server after a local mutation.
+   * Fire-and-forget: clears dirty=false on success, logs a warning on failure.
+   */
+  function syncThread(thread) {
+    if (!_syncUrl || !_db) return;
+    var payload = Object.assign({}, thread);
+    delete payload.dirty;
+    fetch(_syncUrl + '/threads', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(payload),
+    })
+    .then(function (res) {
+      if (!res.ok) throw new Error('sync failed: ' + res.status);
+      return dbGetThread(_db, thread.id);
+    })
+    .then(function (t) {
+      if (t && t.dirty) { t.dirty = false; return dbSaveThread(_db, t); }
+    })
+    .catch(function (e) { console.warn('Annotate.js: syncThread failed', e); });
+  }
+
+  /**
+   * Apply a delta of server threads to the DOM without a full page reload.
+   * Called after every successful pull. Only re-renders what actually changed.
+   */
+  function _rerenderAfterPull(serverThreads) {
+    serverThreads.forEach(function (st) {
+      var existingCard = sidebarBody.querySelector('[data-thread-id="' + st.id + '"]');
+      var existingMark = _threadMarks[st.id];
+
+      // Deleted on server — remove card and/or mark from DOM
+      if (st.deletedAt) {
+        if (existingCard) {
+          if (existingCard._annotationMark) _unwrapMark(existingCard._annotationMark);
+          existingCard.remove();
+          _renderedThreadIds.delete(st.id);
+        } else if (existingMark) {
+          _unwrapMark(existingMark);
+        }
+        delete _threadMarks[st.id];
+        return;
+      }
+
+      // Resolved — dim the active card if still shown; ensure mark has .is-resolved
+      if (st.resolved) {
+        if (existingCard) {
+          existingCard.style.opacity      = '0.4';
+          existingCard.style.pointerEvents = 'none';
+          _renderedThreadIds.delete(st.id);
+        }
+        if (existingMark) {
+          existingMark.classList.add('is-resolved');
+        } else if (st.anchor) {
+          var rr = restoreRange(st.anchor);
+          if (rr) {
+            var rm = highlightRange(rr);
+            rm.classList.add('is-resolved');
+            rm.addEventListener('click', function () { openSidebar(); _switchTab('Resolved'); });
+            _threadMarks[st.id] = rm;
+          }
+        }
+        return;
+      }
+
+      // New active thread from another user — render a fresh card
+      if (!existingCard) {
+        var nr = st.anchor ? restoreRange(st.anchor) : null;
+        var nm = nr ? highlightRange(nr) : null;
+        renderThreadCard(st, nm);
+        return;
+      }
+
+      // Updated active thread — re-render only if updatedAt changed and no composer is open
+      if (st.updatedAt !== existingCard._lastRenderedAt &&
+          !existingCard.querySelector('.annotate-card-composer') &&
+          !existingCard.querySelector('.annotate-reply-composer')) {
+        _renderSavedCard(existingCard, st);
+      }
+    });
+
+    if (!sidebarBody.querySelector('.annotate-card') && emptyMsg) {
+      emptyMsg.style.display = '';
+    }
+  }
+
+  /**
+   * Fetch threads updated since _lastSync from the server, merge into IDB,
+   * and update the DOM delta. Runs on load, on tab focus, and every 30 s.
+   */
+  function pullThreads() {
+    if (!_syncUrl || !_db) return;
+    var since = _lastSync ? ('&since=' + encodeURIComponent(_lastSync)) : '';
+    var url   = _syncUrl + '/threads?siteId=' + encodeURIComponent(_siteId)
+              + '&pageUrl=' + encodeURIComponent(_pageUrl) + since;
+    fetch(url)
+    .then(function (res) { return res.ok ? res.json() : Promise.reject('pull failed: ' + res.status); })
+    .then(function (serverThreads) {
+      // Update _lastSync to the server's latest updatedAt (avoids client clock skew)
+      serverThreads.forEach(function (st) {
+        if (!_lastSync || st.updatedAt > _lastSync) _lastSync = st.updatedAt;
+      });
+      // Merge into IDB: server wins unless local record is dirty (pending push)
+      return Promise.all(serverThreads.map(function (st) {
+        return dbGetThread(_db, st.id).then(function (local) {
+          if (local && local.dirty) return; // local mutation not yet pushed — skip
+          st.dirty = false;
+          return dbSaveThread(_db, st);
+        });
+      })).then(function () { _rerenderAfterPull(serverThreads); });
+    })
+    .catch(function (e) { console.warn('Annotate.js: pullThreads failed', e); });
+  }
+
+  /**
+   * Push any locally-mutated threads that never made it to the server.
+   * Called once on startup to recover from offline sessions.
+   */
+  function flushDirtyThreads() {
+    if (!_syncUrl || !_db) return;
+    _dbGetByPage(_db, _pageUrl).then(function (all) {
+      all.filter(function (t) { return t.dirty; }).forEach(syncThread);
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+
   /** Load all threads for this page, render active ones as cards, restore all highlights */
   function loadThreads(db) {
     return Promise.all([
@@ -1557,6 +1707,7 @@
       if (_db) {
         dbSaveThread(_db, thread)
           .then(function () {
+            syncThread(thread);
             return dbAddActivity(_db, makeActivity('thread_created', thread.id, null, author, 'created: \'' + body.slice(0, 40) + '\''));
           })
           .catch(function (e) { console.warn('Annotate.js: save failed', e); });
@@ -1609,6 +1760,7 @@
           t.replies.push(reply);
           t.dirty = true;
           return dbSaveThread(_db, t).then(function () {
+            syncThread(t);
             return dbAddActivity(_db, makeActivity('reply_added', t.id, reply.id, author, 'replied: \'' + text.slice(0, 40) + '\''));
           });
         }).catch(function (e) { console.warn('Annotate.js: reply persist failed', e); });
@@ -1695,6 +1847,16 @@
     .then(function (db) {
       _db = db;
       return loadThreads(db);
+    })
+    .then(function () {
+      if (_syncUrl) {
+        pullThreads();
+        flushDirtyThreads();
+        setInterval(pullThreads, 30000);
+        document.addEventListener('visibilitychange', function () {
+          if (document.visibilityState === 'visible') pullThreads();
+        });
+      }
     })
     .catch(function (err) {
       console.warn('Annotate.js: IndexedDB unavailable — running in memory-only mode', err);
