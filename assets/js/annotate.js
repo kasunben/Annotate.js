@@ -141,14 +141,32 @@
     });
   }
 
-  /** Wipe the entire database (Settings tab — "Clear all data") */
-  function dbClearAll(siteId) {
+  /**
+   * Wipe all threads and activity for a site.
+   * Prefers clearing the object stores directly when an open IDBDatabase is
+   * provided — avoids the deleteDatabase blocking issue caused by the same
+   * tab's own open connection.  Falls back to deleteDatabase (with an
+   * onblocked→resolve safety net) when no connection is available.
+   */
+  function dbClearAll(siteId, db) {
+    if (db) {
+      return new Promise(function (resolve, reject) {
+        var tx = db.transaction(['threads', 'activity'], 'readwrite');
+        tx.objectStore('threads').clear();
+        tx.objectStore('activity').clear();
+        tx.oncomplete = resolve;
+        tx.onerror    = function () { reject(tx.error); };
+      });
+    }
     return new Promise(function (resolve, reject) {
-      const req = indexedDB.deleteDatabase('annotate-' + siteId);
+      var req = indexedDB.deleteDatabase('annotate-' + siteId);
       req.onsuccess = function () { resolve(); };
       req.onerror   = function () { reject(req.error); };
       req.onblocked = function () {
-        console.warn('Annotate.js: dbClearAll blocked — close other tabs using this database');
+        // Another tab still holds a connection; resolve anyway so the caller
+        // can reload — the pending deletion will complete on next page load.
+        console.warn('Annotate.js: dbClearAll blocked — deletion will complete on reload');
+        resolve();
       };
     });
   }
@@ -1455,7 +1473,11 @@
 
     _panelSettings.querySelector('#annotate-clear-btn').addEventListener('click', function () {
       if (!window.confirm('Delete all annotations and activity for this site? This cannot be undone.')) return;
-      dbClearAll(_siteId)
+      var serverClear = _syncUrl
+        ? fetch(_syncUrl + '/threads?siteId=' + encodeURIComponent(_siteId), { method: 'DELETE' })
+        : Promise.resolve();
+      serverClear
+        .then(function () { return dbClearAll(_siteId, _db); })
         .then(function () { window.location.reload(); })
         .catch(function (e) { console.warn('Annotate.js: clearAll failed', e); });
     });
