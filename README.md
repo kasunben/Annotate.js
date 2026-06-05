@@ -2,7 +2,7 @@
 
 Lightweight inline annotation and threaded comments for any web page — added via a single `<script>` tag.
 
-<!-- ![Demo screenshot showing highlighted text and comment sidebar](docs/screenshot.png) -->
+![Demo screenshot showing highlighted text and comment sidebar](docs/screenshot.png)
 
 ## Features
 
