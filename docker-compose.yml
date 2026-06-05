@@ -1,0 +1,13 @@
+services:
+  annotate:
+    build: .
+    ports:
+      - "${PORT:-3000}:3000"
+    volumes:
+      - annotate_data:/app/server/data
+    environment:
+      - NODE_ENV=production
+    restart: unless-stopped
+
+volumes:
+  annotate_data:

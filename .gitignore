@@ -3,3 +3,4 @@ node_modules/
 server/data/annotate.db
 server/data/annotate.db-shm
 server/data/annotate.db-wal
+assets/annotate.min.js

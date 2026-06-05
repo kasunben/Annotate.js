@@ -3,12 +3,23 @@
   "version": "0.1.0",
   "description": "Lightweight backend for Annotate.js — multi-user sync via SQLite",
   "main": "server/index.js",
+  "engines": {
+    "node": ">=23"
+  },
   "scripts": {
     "start": "node server/index.js",
-    "kill-port": "bash -c 'pid=$(lsof -nP -iTCP:3000 -sTCP:LISTEN 2>/dev/null | grep LISTEN | awk \"{print \\$2}\" | head -1); if [ -n \"$pid\" ]; then kill -9 $pid && echo \"Port 3000 freed (PID $pid)\"; else echo \"Port 3000 is already free\"; fi'"
+    "build": "terser assets/js/annotate.js -o assets/annotate.min.js --compress --mangle",
+    "kill-port": "bash -c 'pid=$(lsof -nP -iTCP:3000 -sTCP:LISTEN 2>/dev/null | grep LISTEN | awk \"{print \\$2}\" | head -1); if [ -n \"$pid\" ]; then kill -9 $pid && echo \"Port 3000 freed (PID $pid)\"; else echo \"Port 3000 is already free\"; fi'",
+    "pm2:start": "pm2 start ecosystem.config.js",
+    "pm2:stop": "pm2 stop annotate",
+    "pm2:restart": "pm2 restart annotate",
+    "pm2:logs": "pm2 logs annotate"
   },
   "dependencies": {
     "cors": "^2.8.5",
     "express": "^4.18.3"
+  },
+  "devDependencies": {
+    "terser": "^5.39.0"
   }
 }

@@ -1,0 +1,6 @@
+node_modules/
+server/data/
+.git/
+.claude/
+docs/
+assets/annotate.min.js

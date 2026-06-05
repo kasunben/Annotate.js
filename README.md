@@ -90,28 +90,40 @@ Select text → add comment
 
 ```
 Annotate.js/
-├── assets/js/annotate.js            # Entire client library — single IIFE, no build needed
+├── assets/
+│   ├── js/annotate.js               # Client library source — single IIFE
+│   └── annotate.min.js              # Production build (gitignored — run npm run build)
 ├── demo/
 │   ├── demo.html                    # Offline-only test page (no data-sync-url)
-│   └── demo-sync-with-server.html  # Multi-user sync test page (data-sync-url set)
+│   └── demo-sync-with-server.html   # Multi-user sync test page (data-sync-url set)
 ├── server/
 │   ├── index.js                     # Express entry point; also serves static files
 │   ├── db.js                        # SQLite schema + rowToThread/threadToRow helpers
-│   └── routes/threads.js            # REST endpoints
+│   ├── routes/threads.js            # REST endpoints
+│   └── data/                        # annotate.db lives here (gitignored)
+├── Dockerfile                       # Multi-stage build → lean production image
+├── docker-compose.yml               # Named volume for SQLite persistence
+├── ecosystem.config.js              # PM2 config (instances: 1 — SQLite single-writer)
+├── .nvmrc                           # Pins Node 23
 ├── package.json
 └── docs/
-    ├── screenshot.png               # UI mockup used in this README
-    └── annotate-js-concept.md      # Phase 1 spec & architecture decisions
+    ├── screenshot.png               
+    └── annotate-js-concept.md       # Phase 1 spec & architecture decisions
 ```
 
 ---
 
 ## npm scripts
 
-| Script | Command | Description |
-|--------|---------|-------------|
-| `npm start` | `node server/index.js` | Start the server on port 3000 |
-| `npm run kill-port` | *(bash)* | Free port 3000 if already in use |
+| Script | Description |
+|--------|-------------|
+| `npm run build` | Minify `assets/js/annotate.js` → `assets/annotate.min.js` |
+| `npm start` | Start the server on port 3000 |
+| `npm run kill-port` | Free port 3000 if already in use |
+| `npm run pm2:start` | Start with PM2 (requires `npm i -g pm2`) |
+| `npm run pm2:restart` | Restart the PM2 process |
+| `npm run pm2:stop` | Stop the PM2 process |
+| `npm run pm2:logs` | Tail PM2 logs |
 
 ---
 
@@ -208,9 +220,56 @@ npm run kill-port
 
 ---
 
+## Self-hosting
+
+Anyone can clone this repo, build the minified library, and deploy the server.
+
+### 1. Build the minified library
+
+```bash
+git clone https://github.com/kasunben/Annotate.js
+npm install
+npm run build   # → assets/annotate.min.js
+```
+
+### 2a. Deploy with Docker (recommended for PaaS / containerized VPS)
+
+```bash
+docker compose up -d
+```
+
+The `docker-compose.yml` mounts a named volume at `/app/server/data` so the SQLite database
+persists across container restarts. Override the port with `PORT=8080 docker compose up -d`.
+
+Works on any Docker host: DigitalOcean, Hetzner, Fly.io, Railway, Render, etc.
+
+### 2b. Deploy with PM2 (bare-metal VPS)
+
+```bash
+npm install -g pm2
+npm run pm2:start
+pm2 save && pm2 startup   # survive server reboots
+```
+
+**Note:** `ecosystem.config.js` sets `instances: 1`. Do not increase this — `node:sqlite` holds a
+write lock on the database; multiple instances deadlock on writes.
+
+### 3. Embed on any page
+
+Point `src` at your deployed server and you're done:
+
+```html
+<script
+  src="https://your-server.example.com/assets/annotate.min.js"
+  data-site-id="my-site"
+  data-sync-url="https://your-server.example.com">
+</script>
+```
+
+---
+
 ## Roadmap
 
 - [ ] Authentication / per-user access control
 - [ ] Real-time push (SSE or WebSocket) to replace polling
 - [ ] Server-side activity log
-- [ ] Deploy guide
