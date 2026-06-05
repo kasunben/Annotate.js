@@ -721,6 +721,130 @@
     #annotate-comment-btn:hover {
       background: #333;
     }
+
+    /* ===================== PANELS (Resolved / Activity / Settings) ===================== */
+    .annotate-panel {
+      padding: 10px;
+      overflow-y: auto;
+    }
+
+    /* Resolved tab — flow-layout cards (not absolutely positioned) */
+    .annotate-resolved-card {
+      border: 1px solid #e4e7eb;
+      border-radius: 10px;
+      background: #fff;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+      margin-bottom: 8px;
+    }
+
+    /* Activity tab */
+    .annotate-activity-list { padding: 4px 0; }
+
+    .annotate-activity-entry {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 10px 4px;
+      border-bottom: 1px solid #f3f4f6;
+    }
+    .annotate-activity-entry:last-child { border-bottom: none; }
+
+    .annotate-activity-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      margin-top: 4px;
+    }
+
+    .annotate-activity-content { flex: 1; min-width: 0; }
+
+    .annotate-activity-actor {
+      font-size: 12px;
+      font-weight: 600;
+      color: #111;
+    }
+
+    .annotate-activity-snapshot {
+      font-size: 12px;
+      color: #6b7280;
+      line-height: 1.4;
+      margin-top: 1px;
+    }
+
+    .annotate-activity-time {
+      font-size: 10px;
+      color: #9ca3af;
+      white-space: nowrap;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      flex-shrink: 0;
+    }
+
+    /* Settings tab */
+    .annotate-settings-group {
+      padding: 14px 4px;
+      border-bottom: 1px solid #f3f4f6;
+    }
+    .annotate-settings-group:last-child { border-bottom: none; }
+
+    .annotate-settings-label {
+      display: block;
+      font-size: 11px;
+      font-weight: 600;
+      color: #6b7280;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 6px;
+    }
+
+    .annotate-settings-input {
+      width: 100%;
+      box-sizing: border-box;
+      border: 1px solid #e5e7eb;
+      border-radius: 7px;
+      padding: 7px 10px;
+      font-size: 13px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      outline: none;
+      color: #111;
+      background: #fafafa;
+    }
+    .annotate-settings-input:focus { border-color: #1a1a1a; background: #fff; }
+
+    .annotate-settings-hint {
+      font-size: 11px;
+      color: #9ca3af;
+      margin-top: 5px;
+    }
+
+    .annotate-settings-btn-danger {
+      background: none;
+      border: 1px solid #dc2626;
+      color: #dc2626;
+      border-radius: 6px;
+      padding: 6px 14px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      transition: background 0.15s, color 0.15s;
+    }
+    .annotate-settings-btn-danger:hover { background: #dc2626; color: #fff; }
+
+    /* Shared empty state */
+    .annotate-empty-state {
+      text-align: center;
+      color: #9ca3af;
+      font-size: 13px;
+      padding: 32px 0;
+    }
+
+    /* Resolved highlight — slightly muted so it reads as "done" */
+    .annotate-highlight.is-resolved {
+      background: #d1fae5;
+      opacity: 0.7;
+    }
   `;
   document.head.appendChild(style);
 
@@ -758,20 +882,46 @@
     <div id="annotate-sidebar-body">
       <span id="annotate-empty">No threads yet.</span>
     </div>
+    <div id="annotate-panel-resolved" class="annotate-panel" style="display:none;"></div>
+    <div id="annotate-panel-activity"  class="annotate-panel" style="display:none;"></div>
+    <div id="annotate-panel-settings"  class="annotate-panel" style="display:none;"></div>
   `;
   document.documentElement.appendChild(sidebar);
 
-  const sidebarBody = document.getElementById('annotate-sidebar-body');
-  const emptyMsg = document.getElementById('annotate-empty');
+  const sidebarBody      = document.getElementById('annotate-sidebar-body');
+  const emptyMsg         = document.getElementById('annotate-empty');
+  const _panelResolved   = document.getElementById('annotate-panel-resolved');
+  const _panelActivity   = document.getElementById('annotate-panel-activity');
+  const _panelSettings   = document.getElementById('annotate-panel-settings');
 
-  // Tab switching (visual only for now)
-  sidebar.querySelectorAll('.annotate-tab').forEach(function (tab) {
-    tab.addEventListener('click', function () {
-      sidebar.querySelectorAll('.annotate-tab').forEach(function (t) {
-        t.classList.remove('active');
-      });
-      tab.classList.add('active');
+  // threadId → <mark> element; used by Resolved tab delete to remove highlight
+  const _threadMarks = {};
+
+  // --- Tab switching ---
+  const _allPanels   = [sidebarBody, _panelResolved, _panelActivity, _panelSettings];
+  const _tabPanelMap = {
+    'Threads':  sidebarBody,
+    'Resolved': _panelResolved,
+    'Activity': _panelActivity,
+    'Settings': _panelSettings,
+  };
+
+  function _switchTab(name) {
+    sidebar.querySelectorAll('.annotate-tab').forEach(function (t) {
+      t.classList.toggle('active', t.textContent.trim() === name);
     });
+    _allPanels.forEach(function (p) { p.style.display = 'none'; });
+    const panel = _tabPanelMap[name];
+    if (panel) panel.style.display = '';
+
+    // Re-render on every open so content always reflects latest IDB state
+    if (name === 'Resolved' && _db) _renderResolvedTab(_db);
+    if (name === 'Activity'  && _db) _renderActivityTab(_db);
+    if (name === 'Settings')         _renderSettingsTab();
+  }
+
+  sidebar.querySelectorAll('.annotate-tab').forEach(function (tab) {
+    tab.addEventListener('click', function () { _switchTab(tab.textContent.trim()); });
   });
 
   // --- Toggle button ---
@@ -1178,6 +1328,7 @@
 
     if (mark) {
       card._annotationMark = mark;
+      _threadMarks[thread.id] = mark;
       mark.addEventListener('click', function () { openSidebar(); });
     }
 
@@ -1202,20 +1353,131 @@
     return card;
   }
 
-  /** Load all threads (active + resolved) for this page and render them with highlights */
+  // --- Panel renderers ---
+
+  /** Resolved tab — flow-layout read-only cards */
+  function _renderResolvedTab(db) {
+    _panelResolved.innerHTML = '';
+    dbGetResolvedThreads(db, _pageUrl).then(function (threads) {
+      if (threads.length === 0) {
+        _panelResolved.innerHTML = '<div class="annotate-empty-state">No resolved threads yet.</div>';
+        return;
+      }
+      threads.forEach(function (thread) {
+        const card = document.createElement('div');
+        card.className = 'annotate-resolved-card';
+        card._threadId = thread.id;
+        card._annotationMark = _threadMarks[thread.id] || null;
+        card.innerHTML = `
+          <div class="annotate-card-quote">${thread.quote}</div>
+          <div class="annotate-card-body"></div>
+        `;
+        _panelResolved.appendChild(card);
+        _renderSavedCard(card, thread);
+        // Resolved threads are read-only — hide Reply / Resolve actions
+        const actionRow = card.querySelector('.annotate-action-row');
+        if (actionRow) actionRow.style.display = 'none';
+      });
+    }).catch(function (e) { console.warn('Annotate.js: _renderResolvedTab failed', e); });
+  }
+
+  /** Activity tab — chronological event feed */
+  function _activityDotColor(type) {
+    if (type.includes('deleted'))  return '#dc2626';
+    if (type.includes('edited'))   return '#d97706';
+    if (type.includes('resolved')) return '#6b7280';
+    return '#1a1a1a';
+  }
+
+  function _renderActivityTab(db) {
+    _panelActivity.innerHTML = '';
+    dbGetActivity(db, _pageUrl).then(function (entries) {
+      if (entries.length === 0) {
+        _panelActivity.innerHTML = '<div class="annotate-empty-state">No activity yet.</div>';
+        return;
+      }
+      const list = document.createElement('div');
+      list.className = 'annotate-activity-list';
+      entries.forEach(function (entry) {
+        const el = document.createElement('div');
+        el.className = 'annotate-activity-entry';
+        el.innerHTML = `
+          <div class="annotate-activity-dot" style="background:${_activityDotColor(entry.type)};"></div>
+          <div class="annotate-activity-content">
+            <span class="annotate-activity-actor">${entry.actor}</span>
+            <div class="annotate-activity-snapshot">${entry.snapshot}</div>
+          </div>
+          <div class="annotate-activity-time">${relativeTime(new Date(entry.timestamp))}</div>
+        `;
+        list.appendChild(el);
+      });
+      _panelActivity.appendChild(list);
+    }).catch(function (e) { console.warn('Annotate.js: _renderActivityTab failed', e); });
+  }
+
+  /** Settings tab — display name + clear data */
+  function _renderSettingsTab() {
+    _panelSettings.innerHTML = `
+      <div class="annotate-settings-group">
+        <label class="annotate-settings-label">Display name</label>
+        <input class="annotate-settings-input" id="annotate-name-input" type="text"
+               value="${getAuthor()}" placeholder="Enter your name…" />
+        <p class="annotate-settings-hint">Shown on all your annotations and replies.</p>
+      </div>
+      <div class="annotate-settings-group">
+        <label class="annotate-settings-label">Data</label>
+        <button class="annotate-settings-btn-danger" id="annotate-clear-btn">Clear all annotations</button>
+        <p class="annotate-settings-hint">Permanently removes all threads and activity for this site.</p>
+      </div>
+    `;
+
+    const nameInput = _panelSettings.querySelector('#annotate-name-input');
+    function _saveName() {
+      const name = nameInput.value.trim();
+      if (name) localStorage.setItem(_AUTHOR_KEY, name);
+    }
+    nameInput.addEventListener('blur', _saveName);
+    nameInput.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { _saveName(); nameInput.blur(); }
+    });
+
+    _panelSettings.querySelector('#annotate-clear-btn').addEventListener('click', function () {
+      if (!window.confirm('Delete all annotations and activity for this site? This cannot be undone.')) return;
+      dbClearAll(_siteId)
+        .then(function () { window.location.reload(); })
+        .catch(function (e) { console.warn('Annotate.js: clearAll failed', e); });
+    });
+  }
+
+  /** Load all threads for this page, render active ones as cards, restore all highlights */
   function loadThreads(db) {
     return Promise.all([
       dbGetThreads(db, _pageUrl),
       dbGetResolvedThreads(db, _pageUrl),
     ]).then(function (results) {
-      const threads = results[0].concat(results[1])
-        .sort(function (a, b) { return a.createdAt.localeCompare(b.createdAt); });
+      const active   = results[0];
+      const resolved = results[1];
 
-      if (threads.length > 0 && emptyMsg) emptyMsg.style.display = 'none';
-      threads.forEach(function (thread) {
+      // Active threads → full ThreadCards in the Threads panel
+      if (active.length > 0 && emptyMsg) emptyMsg.style.display = 'none';
+      active.forEach(function (thread) {
         const range = thread.anchor ? restoreRange(thread.anchor) : null;
         const mark  = range ? highlightRange(range) : null;
         renderThreadCard(thread, mark);
+      });
+
+      // Resolved threads → restore highlight only (card rendered on Resolved tab open)
+      resolved.forEach(function (thread) {
+        const range = thread.anchor ? restoreRange(thread.anchor) : null;
+        const mark  = range ? highlightRange(range) : null;
+        if (mark) {
+          mark.classList.add('is-resolved');
+          mark.addEventListener('click', function () {
+            openSidebar();
+            _switchTab('Resolved');
+          });
+          _threadMarks[thread.id] = mark;
+        }
       });
     }).catch(function (e) { console.warn('Annotate.js: loadThreads failed', e); });
   }

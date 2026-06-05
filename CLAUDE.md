@@ -163,10 +163,10 @@ If XPath no longer resolves (DOM changed), show Thread in sidebar with a
 3. ✅ Wire `annotate.js`: save Thread on note submit, update on resolve/edit/delete/reply, load + re-render on page load
 4. ✅ Display name prompt on first annotation, persist to localStorage
 
-### Phase B — Tab views
-- Resolved tab: read-only ThreadCards filtered by `resolved=true`
-- Activity tab: render ActivityEntry list
-- Settings tab: displayName field + clear-data
+### Phase B — Tab views ✅
+- ✅ Resolved tab: read-only ThreadCards, resolved highlights dimmed on page (`.is-resolved`)
+- ✅ Activity tab: chronological ActivityEntry feed with color-coded dots
+- ✅ Settings tab: displayName input (auto-saves), clear-data button
 
 ### Phase C — Backend sync (deferred)
 - Node.js + SQLite REST API (5 endpoints)
