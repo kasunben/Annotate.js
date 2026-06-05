@@ -37,6 +37,14 @@ Injects a collapsible right sidebar + floating comment button. All CSS embedded 
 
 ## Running the Server
 
+**Prerequisite:** Node.js ≥ 22.5 (experimental) or ≥ 23 (stable)
+
+The server uses the built-in `node:sqlite` module, which requires this version. Check your version:
+```bash
+node --version
+```
+
+Then:
 ```bash
 npm install
 npm start
@@ -52,8 +60,8 @@ The server also serves the demo and assets via `express.static`, so `python3 -m 
 - **Browser APIs only** — DOM, Text Selection, Range, IndexedDB, localStorage, fetch
 
 **Server**
-- **Node.js + Express** — lightweight REST API
-- **`node:sqlite`** — Node's built-in SQLite module (Node ≥ 22.5), no native compilation
+- **Node.js + Express** — lightweight REST API; **requires Node.js ≥ 22.5 (experimental) or ≥ 23 (stable)**
+- **`node:sqlite`** — Node's built-in SQLite module, zero native compilation, zero `npm install` build time
 - **No ORM** — raw SQL prepared statements
 
 ---

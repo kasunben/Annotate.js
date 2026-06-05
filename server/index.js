@@ -1,5 +1,19 @@
 'use strict';
 
+// Guard: node:sqlite requires Node.js >= 22.5 (experimental) or >= 23 (stable)
+const nodeVersion = process.versions.node.split('.').map(Number);
+const major = nodeVersion[0];
+const minor = nodeVersion[1];
+if (major < 23 && (major < 22 || minor < 5)) {
+  console.error(
+    'Annotate.js server requires Node.js >= 22.5 (or >= 23 for stable support).\n' +
+    'The server uses the built-in node:sqlite module which is not available in earlier versions.\n' +
+    'Current version: ' + process.versions.node + '\n' +
+    'Please upgrade: https://nodejs.org/'
+  );
+  process.exit(1);
+}
+
 const express = require('express');
 const cors    = require('cors');
 const path    = require('path');

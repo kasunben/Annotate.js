@@ -27,7 +27,17 @@ That's it. Annotations are stored locally in IndexedDB and survive page reloads.
 
 ## Multi-user sync
 
-### 1. Install and start the server
+### 1. Check Node.js version
+
+```bash
+node --version
+# Node.js >= 22.5 (experimental) or >= 23 (stable) required
+```
+
+The server uses the built-in `node:sqlite` module, which is not available in earlier versions.
+[Download Node.js](https://nodejs.org/) if you need to upgrade.
+
+### 2. Install and start the server
 
 ```bash
 npm install
@@ -35,9 +45,7 @@ npm start
 # → http://localhost:3000
 ```
 
-> Requires Node.js ≥ 22.5 (uses the built-in `node:sqlite` module).
-
-### 2. Add `data-sync-url` to your script tag
+### 3. Add `data-sync-url` to your script tag
 
 ```html
 <!-- Remove data-sync-url to go back to offline-only mode -->
