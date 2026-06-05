@@ -1,6 +1,7 @@
 services:
   annotate:
-    build: .
+    image: ghcr.io/kasunben/annotate.js:latest
+    build: .  # remove this line to use the pre-built image from GHCR
     ports:
       - "${PORT:-3000}:3000"
     volumes:

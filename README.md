@@ -234,8 +234,18 @@ npm run build   # → annotate.min.js
 
 ### 2a. Deploy with Docker (recommended for PaaS / containerized VPS)
 
+The image is published to GitHub Container Registry on every version tag:
+
 ```bash
-docker compose up -d
+# Pull the pre-built image and start (no build step needed)
+docker compose pull && docker compose up -d
+```
+
+Or build locally from source (useful during development):
+
+```bash
+# Edit docker-compose.yml: remove the image: line, keep build: .
+docker compose up -d --build
 ```
 
 The `docker-compose.yml` mounts a named volume at `/app/server/data` so the SQLite database
