@@ -17,7 +17,8 @@ Annotate.js/
 ├── server/
 │   ├── index.js             # Express entry point; also serves static files
 │   ├── db.js                # node:sqlite setup, schema migrations, rowToThread/threadToRow
-│   ├── routes/threads.js    # 8 REST endpoints
+│   ├── routes/threads.js    # 8 REST endpoints for threads
+│   ├── routes/activity.js   # 3 REST endpoints for activity log
 │   └── data/                # annotate.db lives here (gitignored)
 ├── .github/
 │   └── workflows/
@@ -204,7 +205,7 @@ Use these terms consistently in code, comments, and future API design:
 }
 ```
 
-ActivityEntries are **local-only** — not synced to the server. Each browser keeps its own audit trail.
+ActivityEntries are synced to the server when `data-sync-url` is set — all users on a page share the same activity log. Each client pushes on write (`POST /activity`) and pulls on page load, 30s poll, and tab focus (`GET /activity?since=`). When `data-sync-url` is absent, activity is IDB-only (original behaviour preserved).
 
 ### UserConfig (localStorage only)
 ```js
@@ -218,7 +219,7 @@ ActivityEntries are **local-only** — not synced to the server. Each browser ke
 | Data | Store | Why |
 |---|---|---|
 | Threads | **IndexedDB** (primary) + **SQLite** (server) | IDB is the offline working store; server is canonical for multi-user |
-| Activity log | **IndexedDB only** | Local audit trail; no server sync needed |
+| Activity log | **IndexedDB** (primary) + **SQLite** (server) | Same push/pull pattern as threads; cross-user shared history |
 | User config | **localStorage** | Tiny, simple, global |
 
 **IDB name:** `annotate-{siteId}` · **Version:** 1
@@ -228,7 +229,7 @@ ActivityEntries are **local-only** — not synced to the server. Each browser ke
 | `threads` | `id` | `[pageUrl]`, `createdAt` |
 | `activity` | `id` | `[pageUrl]`, `timestamp` |
 
-**SQLite** (`server/data/annotate.db`): single `threads` table. `anchor` and `replies` stored as JSON columns. `dirty` field is client-only and never written to SQLite.
+**SQLite** (`server/data/annotate.db`): `threads` table and `activity` table. `anchor` and `replies` stored as JSON columns in `threads`. `dirty` field is client-only and never written to SQLite. Activity entries use `INSERT OR IGNORE` — they are immutable once written.
 
 ---
 
@@ -266,10 +267,11 @@ Sync is **opt-in** via `data-sync-url`. When absent, the library behaves exactly
 
 | Trigger | Action |
 |---|---|
-| Every local mutation | `syncThread(t)` — fire-and-forget `POST /threads` (upsert) |
-| Page load (after `loadThreads`) | `pullThreads()` — full pull; `flushDirtyThreads()` — push any offline mutations |
-| Every 30 seconds | `pullThreads()` — incremental pull via `?since=_lastSync` |
-| Tab becomes visible | `pullThreads()` — incremental pull |
+| Every local thread mutation | `syncThread(t)` — fire-and-forget `POST /threads` (upsert) |
+| Every local activity event | `syncActivity(entry)` — fire-and-forget `POST /activity` |
+| Page load | `pullThreads()` + `pullActivity()` — full pull; `flushDirtyThreads()` — push offline mutations |
+| Every 30 seconds | `pullThreads()` + `pullActivity()` — incremental pull via `?since=` |
+| Tab becomes visible | `pullThreads()` + `pullActivity()` — incremental pull |
 
 ### Conflict resolution
 
@@ -300,9 +302,13 @@ Delta DOM update after every pull — no full page reload:
 | PATCH | `/threads/:id/replies/:replyId` | `{ body, updatedAt }` | Edit reply |
 | DELETE | `/threads/:id/replies/:replyId` | — | Soft-delete reply (`deleted: true`) |
 | DELETE | `/threads` | `?siteId=` | Hard-delete all threads for a site (Settings → Clear all) |
+| GET | `/activity` | `?siteId&pageUrl[&since]` | All activity for page; `since` enables incremental pull |
+| POST | `/activity` | full ActivityEntry object | `INSERT OR IGNORE` — entries are immutable |
+| DELETE | `/activity` | `?siteId=` | Hard-delete all activity for a site (Settings → Clear all) |
 
-All mutation endpoints return the full updated Thread object so the client can `dbSaveThread` directly.
-GET includes soft-deleted threads so deletes propagate to other clients on pull.
+All thread mutation endpoints return the full updated Thread object so the client can `dbSaveThread` directly.
+GET /threads includes soft-deleted threads so deletes propagate to other clients on pull.
+Activity entries are never updated — `INSERT OR IGNORE` ensures idempotent pushes.
 
 ---
 
@@ -329,9 +335,15 @@ GET includes soft-deleted threads so deletes propagate to other clients on pull.
 - ✅ `ecosystem.config.js` — PM2 config; `instances: 1` enforced for SQLite write-lock safety
 - ✅ `.github/workflows/docker-publish.yml` — publishes `linux/amd64` + `linux/arm64` image to `ghcr.io/kasunben/annotate.js` on `v*.*.*` git tags
 
-### Phase E — Future work
+### Phase E — Server-side activity log ✅
+- ✅ `activity` table in SQLite — `INSERT OR IGNORE`; immutable entries
+- ✅ `GET/POST/DELETE /activity` endpoints in `server/routes/activity.js`
+- ✅ `syncActivity()` + `pullActivity()` in `annotate.js` — same push/pull pattern as threads
+- ✅ `logActivity()` helper — replaces all 7 `dbAddActivity(makeActivity(...))` call sites
+- ✅ Clear all — wipes server activity alongside threads via `Promise.all`
+
+### Phase F — Future work
 - Authentication / per-user access control
-- Server-side activity log (currently local-only)
 - Real-time push (SSE or WebSocket) to replace polling
 - User account registration + annotation profile management (Milestone 2)
 
@@ -377,5 +389,6 @@ Test checklist for any change:
 - **`_renderedThreadIds`** — `Set` tracking IDs of active cards in `sidebarBody`; prevents double-render on first pull after `loadThreads`
 - **`_lastRenderedAt`** — stored on each card DOM element; `_rerenderAfterPull` skips re-render if `updatedAt` hasn't changed
 - **`updatedAt` on every mutation** — all mutations (reply add/edit/delete, resolve, thread delete) must bump `t.updatedAt = new Date().toISOString()` before saving; the `?since` incremental pull filters by `updated_at > _lastSync`, so any mutation that skips this is invisible to other users
+- **`_lastActivitySync`** — mirrors `_lastSync` but for activity; set to max `timestamp` from each `/activity` pull response; drives incremental `?since=` pulls so unchanged entries are never re-fetched
 - **`dbClearAll(siteId, db)`** — pass the open `_db` connection to clear stores via `readwrite` transaction instead of `deleteDatabase`; `deleteDatabase` is blocked by the tab's own open connection, causing the reload to never fire; falls back to `deleteDatabase` (with `onblocked → resolve` safety net) when no connection is available
 - **card identity — two paths must stay in sync** — `renderThreadCard` and `addAnnotationCard` both create cards; both must set `card._threadId`, `card.dataset.threadId`, and `_renderedThreadIds.add(id)`; if `addAnnotationCard` omits `dataset.threadId` or the Set entry, `_rerenderAfterPull` treats the locally-created thread as new-from-server on the next pull, producing duplicate cards, re-applied highlights (marks move/vanish), and replies landing on the wrong card

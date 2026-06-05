@@ -33,7 +33,7 @@ That's it. Annotations are stored locally in IndexedDB and survive page reloads.
 
 ```bash
 node --version
-# Node.js >= 22.5 (experimental) or >= 23 (stable) required
+# Node.js >= 23 required
 ```
 
 The server uses the built-in `node:sqlite` module, which is not available in earlier versions.
@@ -99,7 +99,8 @@ Annotate.js/
 ├── server/
 │   ├── index.js                     # Express entry point; also serves static files
 │   ├── db.js                        # SQLite schema + rowToThread/threadToRow helpers
-│   ├── routes/threads.js            # REST endpoints
+│   ├── routes/threads.js            # Thread REST endpoints
+│   ├── routes/activity.js           # Activity REST endpoints
 │   └── data/                        # annotate.db lives here (gitignored)
 ├── Dockerfile                       # Multi-stage build → lean production image
 ├── docker-compose.yml               # Named volume for SQLite persistence
@@ -140,6 +141,9 @@ Annotate.js/
 | `PATCH` | `/threads/:id/replies/:replyId` | Edit reply |
 | `DELETE` | `/threads/:id/replies/:replyId` | Soft-delete reply |
 | `DELETE` | `/threads?siteId=` | Hard-delete all threads for a site (Settings → Clear all) |
+| `GET` | `/activity?siteId=&pageUrl=[&since=]` | Fetch activity for page; `since` for incremental pull |
+| `POST` | `/activity` | Push one activity entry (`INSERT OR IGNORE` — entries are immutable) |
+| `DELETE` | `/activity?siteId=` | Hard-delete all activity for a site (Settings → Clear all) |
 
 ---
 
@@ -149,7 +153,7 @@ Annotate.js/
 |-----|---------|
 | **Threads** | Active annotations for the current page |
 | **Resolved** | Resolved annotations (read-only) |
-| **Activity** | Local event feed — every create, reply, edit, resolve, delete |
+| **Activity** | Shared event feed — all users' creates, replies, edits, resolves, deletes |
 | **Settings** | Display name · Clear all annotations |
 
 ---
@@ -196,6 +200,9 @@ No automated test suite. Two demo pages available after `npm start`:
 - [ ] User A deletes → User B's highlight unwraps within 30 s
 - [ ] Kill server → User A can still annotate (offline mode, `dirty=true`)
 - [ ] Restart server → User A's offline annotations push automatically
+- [ ] User A annotates → User B's Activity tab shows `thread_created` within 30 s
+- [ ] User A resolves → User B's Activity tab shows `thread_resolved` within 30 s
+- [ ] Settings → Clear all on User A → User B's Activity tab empties on next pull
 
 ---
 
@@ -282,4 +289,4 @@ Point `src` at your deployed server and you're done:
 
 - [ ] Authentication / per-user access control
 - [ ] Real-time push (SSE or WebSocket) to replace polling
-- [ ] Server-side activity log
+- [ ] User account registration + annotation profile management (Milestone 2)
