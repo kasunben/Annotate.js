@@ -6,24 +6,21 @@ Lightweight vanilla JS library that adds inline annotation and threaded comments
 
 ```
 Annotate.js/
-├── assets/js/annotate.js   # Entire library (~800 lines, single IIFE)
-├── assets/js/db.js         # IndexedDB wrapper (planned)
-├── assets/js/anchor.js     # Range serialization / restore (planned)
+├── assets/js/annotate.js   # Entire library (single IIFE — DB layer + anchor + UI all inlined)
 ├── demo/demo.html           # Manual test harness / integration example
 └── docs/annotate-js-concept.md  # Phase 1 spec & architecture decisions
 ```
 
-No `package.json`, no build tools, no framework — intentional. Distribute as plain JS files.
+No `package.json`, no build tools, no framework — intentional. Distributes as a **single JS file**.
 
 ## Integration
 
 ```html
-<script src="assets/js/db.js"></script>
-<script src="assets/js/anchor.js"></script>
-<script src="assets/js/annotate.js" data-site-id="your-site-id"></script>
+<script src="annotate.js" data-site-id="your-site-id"></script>
 ```
 
-Injects a collapsible right sidebar + floating comment button. All CSS embedded in JS via `document.createElement('style')`.
+One tag. Everything (IndexedDB layer, anchor serialization, UI, CSS) is inlined into the IIFE.
+Injects a collapsible right sidebar + floating comment button. All CSS embedded via `document.createElement('style')`.
 
 ## Tech Stack
 
@@ -161,8 +158,8 @@ If XPath no longer resolves (DOM changed), show Thread in sidebar with a
 ## Implementation Phases
 
 ### Phase A — Persistence (current focus)
-1. `db.js` — IndexedDB wrapper: `openDB`, `getThreads`, `saveThread`, `updateThread`, `deleteThread`, `addActivity`, `getActivity`
-2. `anchor.js` — `serializeRange(range) → Anchor`, `restoreRange(anchor) → Range`
+1. ✅ IndexedDB layer — inlined into `annotate.js`: `openDB`, `dbGetThreads`, `dbGetResolvedThreads`, `dbSaveThread`, `dbDeleteThread`, `dbAddActivity`, `dbGetActivity`, `dbClearAll`, `generateId`, `normalizeUrl`
+2. Anchor layer — inline into `annotate.js`: `serializeRange(range) → Anchor`, `restoreRange(anchor) → Range`
 3. Wire `annotate.js`: save Thread on note submit, update on resolve/edit/delete/reply, load + re-render on page load
 4. Display name prompt on first annotation, persist to localStorage
 

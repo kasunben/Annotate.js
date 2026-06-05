@@ -1,4 +1,159 @@
 (function () {
+  'use strict';
+
+  // ── IndexedDB layer ───────────────────────────────────────────────────────
+  //
+  // All persistence functions live here, inside the same IIFE, so no separate
+  // <script> tag is needed. The library ships as a single file.
+  //
+  // Database : annotate-{siteId}   Version : 1
+  // Stores   : threads (keyed by id, indexed by pageUrl / createdAt)
+  //            activity (keyed by id, indexed by pageUrl / timestamp)
+
+  /** UUID v4 — uses crypto.randomUUID where available, Math.random fallback */
+  function generateId() {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+      const r = Math.random() * 16 | 0;
+      return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+    });
+  }
+
+  /** Strip the hash fragment so #section links share the same annotation set */
+  function normalizeUrl(url) {
+    try { const u = new URL(url); u.hash = ''; return u.toString(); }
+    catch (_) { return url; }
+  }
+
+  /** Open (or create/upgrade) the IndexedDB database for a site */
+  function openDB(siteId) {
+    return new Promise(function (resolve, reject) {
+      if (!siteId) { reject(new Error('Annotate.js: siteId is required')); return; }
+
+      const request = indexedDB.open('annotate-' + siteId, 1);
+
+      request.onupgradeneeded = function (e) {
+        const db = e.target.result;
+
+        // threads — boolean is not a valid IDB key type, so no compound index
+        // for [pageUrl, resolved]. Filtering happens in JS after a pageUrl fetch.
+        if (!db.objectStoreNames.contains('threads')) {
+          const s = db.createObjectStore('threads', { keyPath: 'id' });
+          s.createIndex('pageUrl',   'pageUrl',   { unique: false });
+          s.createIndex('createdAt', 'createdAt', { unique: false });
+        }
+
+        // activity log
+        if (!db.objectStoreNames.contains('activity')) {
+          const s = db.createObjectStore('activity', { keyPath: 'id' });
+          s.createIndex('pageUrl',   'pageUrl',   { unique: false });
+          s.createIndex('timestamp', 'timestamp', { unique: false });
+        }
+      };
+
+      request.onsuccess = function (e) { resolve(e.target.result); };
+      request.onerror   = function (e) {
+        console.error('Annotate.js: could not open IndexedDB', e.target.error);
+        reject(e.target.error);
+      };
+    });
+  }
+
+  /** Fetch a single Thread by primary key */
+  function dbGetThread(db, id) {
+    return new Promise(function (resolve, reject) {
+      const req = db.transaction('threads', 'readonly').objectStore('threads').get(id);
+      req.onsuccess = function () { resolve(req.result || null); };
+      req.onerror   = function () { reject(req.error); };
+    });
+  }
+
+  /** Internal: fetch all threads for a pageUrl, sorted by createdAt */
+  function _dbGetByPage(db, pageUrl) {
+    return new Promise(function (resolve, reject) {
+      const req = db.transaction('threads', 'readonly')
+        .objectStore('threads').index('pageUrl').getAll(pageUrl);
+      req.onsuccess = function () {
+        resolve((req.result || []).sort(function (a, b) {
+          return a.createdAt.localeCompare(b.createdAt);
+        }));
+      };
+      req.onerror = function () { reject(req.error); };
+    });
+  }
+
+  /** Active (unresolved, not deleted) Threads for a page */
+  function dbGetThreads(db, pageUrl) {
+    return _dbGetByPage(db, pageUrl).then(function (all) {
+      return all.filter(function (t) { return !t.resolved && !t.deletedAt; });
+    });
+  }
+
+  /** Resolved (not deleted) Threads for a page */
+  function dbGetResolvedThreads(db, pageUrl) {
+    return _dbGetByPage(db, pageUrl).then(function (all) {
+      return all.filter(function (t) { return t.resolved && !t.deletedAt; });
+    });
+  }
+
+  /** Upsert a Thread (insert or full replace) */
+  function dbSaveThread(db, thread) {
+    return new Promise(function (resolve, reject) {
+      const req = db.transaction('threads', 'readwrite').objectStore('threads').put(thread);
+      req.onsuccess = function () { resolve(); };
+      req.onerror   = function () { reject(req.error); };
+    });
+  }
+
+  /** Soft-delete: sets deletedAt + dirty, never hard-removes (needed for future sync) */
+  function dbDeleteThread(db, threadId) {
+    return dbGetThread(db, threadId).then(function (thread) {
+      if (!thread) return;
+      thread.deletedAt = new Date().toISOString();
+      thread.dirty = true;
+      return dbSaveThread(db, thread);
+    });
+  }
+
+  /** Append an ActivityEntry */
+  function dbAddActivity(db, entry) {
+    return new Promise(function (resolve, reject) {
+      const req = db.transaction('activity', 'readwrite').objectStore('activity').put(entry);
+      req.onsuccess = function () { resolve(); };
+      req.onerror   = function () { reject(req.error); };
+    });
+  }
+
+  /** All ActivityEntries for a page, newest first */
+  function dbGetActivity(db, pageUrl) {
+    return new Promise(function (resolve, reject) {
+      const req = db.transaction('activity', 'readonly')
+        .objectStore('activity').index('pageUrl').getAll(pageUrl);
+      req.onsuccess = function () {
+        resolve((req.result || []).sort(function (a, b) {
+          return b.timestamp.localeCompare(a.timestamp);
+        }));
+      };
+      req.onerror = function () { reject(req.error); };
+    });
+  }
+
+  /** Wipe the entire database (Settings tab — "Clear all data") */
+  function dbClearAll(siteId) {
+    return new Promise(function (resolve, reject) {
+      const req = indexedDB.deleteDatabase('annotate-' + siteId);
+      req.onsuccess = function () { resolve(); };
+      req.onerror   = function () { reject(req.error); };
+      req.onblocked = function () {
+        console.warn('Annotate.js: dbClearAll blocked — close other tabs using this database');
+      };
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+
   console.log('Annotate.js loaded');
 
   // --- Styles ---
