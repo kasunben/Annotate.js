@@ -4,7 +4,8 @@
   "description": "Lightweight backend for Annotate.js — multi-user sync via SQLite",
   "main": "server/index.js",
   "scripts": {
-    "start": "node server/index.js"
+    "start": "node server/index.js",
+    "kill-port": "bash -c 'pid=$(lsof -nP -iTCP:3000 -sTCP:LISTEN 2>/dev/null | grep LISTEN | awk \"{print \\$2}\" | head -1); if [ -n \"$pid\" ]; then kill -9 $pid && echo \"Port 3000 freed (PID $pid)\"; else echo \"Port 3000 is already free\"; fi'"
   },
   "dependencies": {
     "cors": "^2.8.5",

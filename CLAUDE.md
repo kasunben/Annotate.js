@@ -274,6 +274,8 @@ npm start
 # open http://localhost:3000/demo/demo.html in two browser windows
 ```
 
+**Note:** The server runs on port 3000. If the port is already in use (common during development when testing stops and the process remains), use `npm run kill-port` to free it, or manually kill the process with `lsof -nP -iTCP:3000 -sTCP:LISTEN` and `kill -9 <PID>`.
+
 Test checklist for any change:
 - Select text → comment button appears, positioned correctly
 - Add Thread → Highlight appears, ThreadCard created in sidebar

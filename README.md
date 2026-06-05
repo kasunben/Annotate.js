@@ -163,6 +163,29 @@ npm start
 
 ---
 
+---
+
+## Troubleshooting
+
+### Port 3000 already in use
+
+If the server won't start because port 3000 is already occupied:
+
+```bash
+# Find the process using port 3000
+lsof -nP -iTCP:3000 -sTCP:LISTEN
+
+# Kill it by PID (replace 12345 with the actual PID)
+kill -9 12345
+```
+
+Or use the npm script:
+```bash
+npm run kill-port
+```
+
+---
+
 ## Roadmap
 
 - [ ] Authentication / per-user access control
