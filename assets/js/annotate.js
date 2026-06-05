@@ -112,6 +112,7 @@
     return dbGetThread(db, threadId).then(function (thread) {
       if (!thread) return;
       thread.deletedAt = new Date().toISOString();
+      thread.updatedAt = new Date().toISOString();
       thread.dirty = true;
       return dbSaveThread(db, thread);
     });
@@ -1143,7 +1144,7 @@
           dbGetThread(_db, card._threadId).then(function (t) {
             if (!t) return;
             const r = t.replies.find(function (x) { return x.id === replyId; });
-            if (r) { r.body = updated; r.updatedAt = new Date().toISOString(); t.dirty = true; }
+            if (r) { r.body = updated; r.updatedAt = new Date().toISOString(); t.updatedAt = new Date().toISOString(); t.dirty = true; }
             return dbSaveThread(_db, t).then(function () {
               syncThread(t);
               return dbAddActivity(_db, makeActivity('reply_edited', t.id, replyId, r ? r.author : '', 'edited reply'));
@@ -1172,7 +1173,7 @@
         dbGetThread(_db, card._threadId).then(function (t) {
           if (!t) return;
           const r = t.replies.find(function (x) { return x.id === replyId; });
-          if (r) { r.deleted = true; t.dirty = true; }
+          if (r) { r.deleted = true; t.updatedAt = new Date().toISOString(); t.dirty = true; }
           return dbSaveThread(_db, t).then(function () {
             syncThread(t);
             return dbAddActivity(_db, makeActivity('reply_deleted', t.id, replyId, r ? r.author : '', 'deleted reply'));
@@ -1223,7 +1224,7 @@
         dbGetThread(_db, thread.id).then(function (t) {
           if (!t) return;
           const who = getAuthor();
-          t.resolved = true; t.resolvedAt = new Date().toISOString(); t.resolvedBy = who; t.dirty = true;
+          t.resolved = true; t.resolvedAt = new Date().toISOString(); t.resolvedBy = who; t.updatedAt = new Date().toISOString(); t.dirty = true;
           return dbSaveThread(_db, t).then(function () {
             syncThread(t);
             return dbAddActivity(_db, makeActivity('thread_resolved', t.id, null, who, 'resolved thread'));
@@ -1758,6 +1759,7 @@
         dbGetThread(_db, card._threadId).then(function (t) {
           if (!t) return;
           t.replies.push(reply);
+          t.updatedAt = new Date().toISOString();
           t.dirty = true;
           return dbSaveThread(_db, t).then(function () {
             syncThread(t);
