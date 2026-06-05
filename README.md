@@ -4,6 +4,8 @@ Lightweight inline annotation and threaded comments for any web page — added v
 
 ![Demo screenshot showing highlighted text and comment sidebar](docs/screenshot.png)
 
+---
+
 ## Features
 
 - **Select any text** → floating button → add a comment
