@@ -1,3 +1,5 @@
 .DS_Store
 node_modules/
 server/data/annotate.db
+server/data/annotate.db-shm
+server/data/annotate.db-wal
