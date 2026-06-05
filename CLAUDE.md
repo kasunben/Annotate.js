@@ -159,7 +159,7 @@ If XPath no longer resolves (DOM changed), show Thread in sidebar with a
 
 ### Phase A — Persistence (current focus)
 1. ✅ IndexedDB layer — inlined into `annotate.js`: `openDB`, `dbGetThreads`, `dbGetResolvedThreads`, `dbSaveThread`, `dbDeleteThread`, `dbAddActivity`, `dbGetActivity`, `dbClearAll`, `generateId`, `normalizeUrl`
-2. Anchor layer — inline into `annotate.js`: `serializeRange(range) → Anchor`, `restoreRange(anchor) → Range`
+2. ✅ Anchor layer — inlined into `annotate.js`: `serializeRange(range) → Anchor`, `restoreRange(anchor) → Range|null`
 3. Wire `annotate.js`: save Thread on note submit, update on resolve/edit/delete/reply, load + re-render on page load
 4. Display name prompt on first annotation, persist to localStorage
 

@@ -154,6 +154,110 @@
 
   // ─────────────────────────────────────────────────────────────────────────
 
+  // ── Anchor layer ──────────────────────────────────────────────────────────
+  //
+  // Range objects are ephemeral — destroyed on page unload. We serialize a
+  // selection to a stable XPath + character offsets so highlights can be
+  // reconstructed on every page load.
+  //
+  // Anchor shape: { xpath: string, startOffset: number, endOffset: number }
+  //
+  // ⚠️  Always call serializeRange(range) BEFORE highlightRange(range).
+  //     Wrapping the selected text in <mark> mutates the DOM and changes the
+  //     XPath of the original text node immediately afterwards.
+
+  /**
+   * Walk a node up to the document root, building an absolute XPath.
+   *   Text nodes    →  text()[n]   (1-based index among text-node siblings)
+   *   Element nodes →  tagname[n]  (1-based index among same-tag siblings)
+   *
+   * @param  {Node} node
+   * @returns {string}
+   */
+  function _getXPath(node) {
+    const parts = [];
+    let current = node;
+
+    while (current && current.nodeType !== Node.DOCUMENT_NODE) {
+      if (current.nodeType === Node.TEXT_NODE) {
+        let index = 1;
+        let sib = current.previousSibling;
+        while (sib) {
+          if (sib.nodeType === Node.TEXT_NODE) index++;
+          sib = sib.previousSibling;
+        }
+        parts.unshift('text()[' + index + ']');
+
+      } else if (current.nodeType === Node.ELEMENT_NODE) {
+        const tag = current.tagName.toLowerCase();
+        let index = 1;
+        let sib = current.previousSibling;
+        while (sib) {
+          if (sib.nodeType === Node.ELEMENT_NODE &&
+              sib.tagName.toLowerCase() === tag) index++;
+          sib = sib.previousSibling;
+        }
+        parts.unshift(tag + '[' + index + ']');
+      }
+
+      current = current.parentNode;
+    }
+
+    return '/' + parts.join('/');
+  }
+
+  /**
+   * Serialize a live Range to a persistent Anchor.
+   * ⚠️  Call this BEFORE highlightRange() — see note above.
+   *
+   * @param  {Range} range
+   * @returns {{ xpath: string, startOffset: number, endOffset: number }}
+   */
+  function serializeRange(range) {
+    return {
+      xpath:       _getXPath(range.startContainer),
+      startOffset: range.startOffset,
+      endOffset:   range.endOffset,
+    };
+  }
+
+  /**
+   * Reconstruct a Range from a stored Anchor.
+   * Returns null (never throws) if the XPath no longer resolves — the DOM
+   * changed since the annotation was created. Callers should show a
+   * "highlight unavailable" indicator rather than silently dropping the Thread.
+   *
+   * @param  {{ xpath: string, startOffset: number, endOffset: number }} anchor
+   * @returns {Range|null}
+   */
+  function restoreRange(anchor) {
+    try {
+      const result = document.evaluate(
+        anchor.xpath,
+        document,
+        null,
+        XPathResult.FIRST_ORDERED_NODE_TYPE,
+        null
+      );
+      const node = result.singleNodeValue;
+      if (!node) return null;
+
+      // Guard: offsets must be within the text node's actual length
+      const len = node.nodeValue ? node.nodeValue.length : 0;
+      if (anchor.startOffset > len || anchor.endOffset > len) return null;
+
+      const range = document.createRange();
+      range.setStart(node, anchor.startOffset);
+      range.setEnd(node, anchor.endOffset);
+      return range;
+    } catch (e) {
+      console.warn('Annotate.js: restoreRange failed', anchor, e);
+      return null;
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+
   console.log('Annotate.js loaded');
 
   // --- Styles ---
