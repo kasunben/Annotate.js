@@ -258,7 +258,13 @@
 
   // ─────────────────────────────────────────────────────────────────────────
 
-  console.log('Annotate.js loaded');
+  // ── Runtime state ─────────────────────────────────────────────────────────
+  // document.currentScript is only available during synchronous execution.
+  const _siteId  = (document.currentScript && document.currentScript.dataset.siteId) || 'default';
+  const _pageUrl = normalizeUrl(window.location.href);
+  let   _db      = null; // IDBDatabase — set by init(); null = memory-only mode
+
+  console.log('Annotate.js loaded — site:', _siteId);
 
   // --- Styles ---
   const style = document.createElement('style');
@@ -803,6 +809,46 @@
     return Math.floor(diff / 86400) + 'D AGO';
   }
 
+  // --- Author (localStorage) ---
+  const _AUTHOR_KEY = 'annotate_display_name';
+
+  function getAuthor() {
+    return localStorage.getItem(_AUTHOR_KEY) || '';
+  }
+
+  /** Return the stored display name, prompting once on first annotation */
+  function ensureAuthor() {
+    let name = getAuthor();
+    if (!name) {
+      name = (window.prompt('Enter your display name for annotations:') || '').trim();
+      if (!name) name = 'Anonymous';
+      localStorage.setItem(_AUTHOR_KEY, name);
+    }
+    return name;
+  }
+
+  // --- Activity factory ---
+  function makeActivity(type, threadId, replyId, actor, snapshot) {
+    return {
+      id:       generateId(),
+      siteId:   _siteId,
+      pageUrl:  _pageUrl,
+      type:     type,
+      threadId: threadId,
+      replyId:  replyId || null,
+      actor:    actor,
+      timestamp: new Date().toISOString(),
+      snapshot: snapshot,
+    };
+  }
+
+  // --- Shared UI helpers ---
+  const _MENU_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>';
+
+  function _avatarLetter(name) {
+    return (name || 'A').charAt(0).toUpperCase();
+  }
+
   // --- Resolve card top to avoid overlapping existing cards ---
   function resolveCardTop(desiredTop, newCard) {
     const gap = 8;
@@ -860,7 +906,7 @@
     ro.observe(card);
   }
 
-  // --- Add annotation card to sidebar ---
+  // --- Highlight helper ---
   function highlightRange(range) {
     try {
       const mark = document.createElement('mark');
@@ -873,6 +919,302 @@
     }
   }
 
+  // --- Shared card/reply rendering helpers ---
+
+  /** Wire a three-dot menu button ↔ its dropdown (shared by threads and replies) */
+  function _wireMenuDropdown(menuBtn, dropdown) {
+    menuBtn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      dropdown.classList.toggle('hidden');
+    });
+    document.addEventListener('click', function () {
+      dropdown.classList.add('hidden');
+    });
+  }
+
+  /** Build a DOM element for one saved reply */
+  function _buildReplyEl(reply) {
+    const el = document.createElement('div');
+    el.className = 'annotate-reply';
+    el.innerHTML = `
+      <div class="annotate-meta">
+        <div class="annotate-avatar annotate-avatar-sm">${_avatarLetter(reply.author)}</div>
+        <div class="annotate-meta-right">
+          <div class="annotate-author-row">
+            <span class="annotate-author">${reply.author}</span>
+            <div class="annotate-author-row-right">
+              <span class="annotate-timestamp">${relativeTime(new Date(reply.createdAt))}</span>
+              <button class="annotate-icon-btn annotate-menu-btn" title="More">${_MENU_SVG}</button>
+              <div class="annotate-dropdown hidden">
+                <button class="annotate-dropdown-item annotate-edit-btn">Edit</button>
+                <button class="annotate-dropdown-item danger annotate-delete-btn">Delete</button>
+              </div>
+            </div>
+          </div>
+          <p class="annotate-note-text" style="margin-bottom:0;">${reply.body}</p>
+        </div>
+      </div>
+    `;
+    return el;
+  }
+
+  /** Wire edit + delete on a reply element; persists changes via card._threadId */
+  function _wireReplyEl(replyEl, replyId, card) {
+    replyEl._replyId = replyId;
+    const dropdown = replyEl.querySelector('.annotate-dropdown');
+    _wireMenuDropdown(replyEl.querySelector('.annotate-menu-btn'), dropdown);
+
+    // Edit reply
+    replyEl.querySelector('.annotate-edit-btn').addEventListener('click', function () {
+      dropdown.classList.add('hidden');
+      const noteEl      = replyEl.querySelector('.annotate-note-text');
+      const currentText = noteEl.textContent;
+
+      const editor = document.createElement('div');
+      editor.innerHTML = `
+        <textarea class="annotate-reply-composer" style="margin-top:6px;">${currentText}</textarea>
+        <div class="annotate-card-actions">
+          <button class="annotate-btn-cancel">Cancel</button>
+          <button class="annotate-btn-save">Save</button>
+        </div>
+      `;
+      noteEl.replaceWith(editor);
+      const ta = editor.querySelector('textarea');
+      ta.focus();
+      ta.setSelectionRange(ta.value.length, ta.value.length);
+
+      editor.querySelector('.annotate-btn-save').addEventListener('click', function () {
+        const updated = ta.value.trim();
+        if (!updated) return;
+        if (_db) {
+          dbGetThread(_db, card._threadId).then(function (t) {
+            if (!t) return;
+            const r = t.replies.find(function (x) { return x.id === replyId; });
+            if (r) { r.body = updated; r.updatedAt = new Date().toISOString(); t.dirty = true; }
+            return dbSaveThread(_db, t).then(function () {
+              return dbAddActivity(_db, makeActivity('reply_edited', t.id, replyId, r ? r.author : '', 'edited reply'));
+            });
+          }).catch(function (e) { console.warn('Annotate.js: reply edit persist failed', e); });
+        }
+        const newNote = document.createElement('p');
+        newNote.className = 'annotate-note-text';
+        newNote.style.marginBottom = '0';
+        newNote.textContent = updated;
+        editor.replaceWith(newNote);
+      });
+
+      editor.querySelector('.annotate-btn-cancel').addEventListener('click', function () {
+        const restored = document.createElement('p');
+        restored.className = 'annotate-note-text';
+        restored.style.marginBottom = '0';
+        restored.textContent = currentText;
+        editor.replaceWith(restored);
+      });
+    });
+
+    // Delete reply
+    replyEl.querySelector('.annotate-delete-btn').addEventListener('click', function () {
+      if (_db) {
+        dbGetThread(_db, card._threadId).then(function (t) {
+          if (!t) return;
+          const r = t.replies.find(function (x) { return x.id === replyId; });
+          if (r) { r.deleted = true; t.dirty = true; }
+          return dbSaveThread(_db, t).then(function () {
+            return dbAddActivity(_db, makeActivity('reply_deleted', t.id, replyId, r ? r.author : '', 'deleted reply'));
+          });
+        }).catch(function (e) { console.warn('Annotate.js: reply delete persist failed', e); });
+      }
+      replyEl.remove();
+    });
+  }
+
+  /**
+   * Render the saved-state body of a ThreadCard and wire all interactions.
+   * Called both after a fresh save AND when loading threads from IDB on page load.
+   */
+  function _renderSavedCard(card, thread) {
+    const cardBody = card.querySelector('.annotate-card-body');
+    cardBody.innerHTML = `
+      <div class="annotate-meta">
+        <div class="annotate-avatar">${_avatarLetter(thread.author)}</div>
+        <div class="annotate-meta-right">
+          <div class="annotate-author-row">
+            <span class="annotate-author">${thread.author}</span>
+            <div class="annotate-author-row-right">
+              <span class="annotate-timestamp">${relativeTime(new Date(thread.createdAt))}</span>
+              <button class="annotate-icon-btn annotate-menu-btn" title="More">${_MENU_SVG}</button>
+              <div class="annotate-dropdown hidden">
+                <button class="annotate-dropdown-item annotate-edit-btn">Edit</button>
+                <button class="annotate-dropdown-item danger annotate-delete-btn">Delete</button>
+              </div>
+            </div>
+          </div>
+          <p class="annotate-note-text">${thread.body}</p>
+          <div class="annotate-action-row">
+            <button class="annotate-action-btn annotate-reply-trigger">Reply</button>
+            <button class="annotate-action-btn annotate-resolve-btn">Resolve</button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    const dropdown = cardBody.querySelector('.annotate-dropdown');
+    _wireMenuDropdown(cardBody.querySelector('.annotate-menu-btn'), dropdown);
+
+    // Resolve
+    cardBody.querySelector('.annotate-resolve-btn').addEventListener('click', function () {
+      if (_db) {
+        dbGetThread(_db, thread.id).then(function (t) {
+          if (!t) return;
+          const who = getAuthor();
+          t.resolved = true; t.resolvedAt = new Date().toISOString(); t.resolvedBy = who; t.dirty = true;
+          return dbSaveThread(_db, t).then(function () {
+            return dbAddActivity(_db, makeActivity('thread_resolved', t.id, null, who, 'resolved thread'));
+          });
+        }).catch(function (e) { console.warn('Annotate.js: resolve persist failed', e); });
+      }
+      card.style.opacity = '0.4';
+      card.style.pointerEvents = 'none';
+    });
+
+    // Edit body
+    cardBody.querySelector('.annotate-edit-btn').addEventListener('click', function () {
+      dropdown.classList.add('hidden');
+      const noteEl      = cardBody.querySelector('.annotate-note-text');
+      const currentText = noteEl.textContent;
+
+      const editor = document.createElement('div');
+      editor.innerHTML = `
+        <textarea class="annotate-card-composer" style="margin-top:8px;">${currentText}</textarea>
+        <div class="annotate-card-actions">
+          <button class="annotate-btn-cancel">Cancel</button>
+          <button class="annotate-btn-save">Save</button>
+        </div>
+      `;
+      noteEl.replaceWith(editor);
+      const ta = editor.querySelector('textarea');
+      ta.focus();
+      ta.setSelectionRange(ta.value.length, ta.value.length);
+
+      editor.querySelector('.annotate-btn-save').addEventListener('click', function () {
+        const updated = ta.value.trim();
+        if (!updated) return;
+        if (_db) {
+          dbGetThread(_db, thread.id).then(function (t) {
+            if (!t) return;
+            t.body = updated; t.updatedAt = new Date().toISOString(); t.dirty = true;
+            return dbSaveThread(_db, t).then(function () {
+              return dbAddActivity(_db, makeActivity('thread_edited', t.id, null, t.author, 'edited: \'' + updated.slice(0, 40) + '\''));
+            });
+          }).catch(function (e) { console.warn('Annotate.js: edit persist failed', e); });
+        }
+        const newNote = document.createElement('p');
+        newNote.className = 'annotate-note-text';
+        newNote.textContent = updated;
+        editor.replaceWith(newNote);
+      });
+
+      editor.querySelector('.annotate-btn-cancel').addEventListener('click', function () {
+        const restored = document.createElement('p');
+        restored.className = 'annotate-note-text';
+        restored.textContent = currentText;
+        editor.replaceWith(restored);
+      });
+    });
+
+    // Delete thread
+    cardBody.querySelector('.annotate-delete-btn').addEventListener('click', function () {
+      if (_db) {
+        dbDeleteThread(_db, thread.id)
+          .then(function () {
+            return dbAddActivity(_db, makeActivity('thread_deleted', thread.id, null, getAuthor(), 'deleted thread'));
+          })
+          .catch(function (e) { console.warn('Annotate.js: delete persist failed', e); });
+      }
+      if (card._annotationMark) {
+        const m = card._annotationMark, p = m.parentNode;
+        if (p) { while (m.firstChild) p.insertBefore(m.firstChild, m); p.removeChild(m); }
+      }
+      card.remove();
+      if (!sidebarBody.querySelector('.annotate-card')) emptyMsg.style.display = '';
+    });
+
+    // Replies — rebuild section (handles both fresh cards and IDB-loaded threads)
+    const existing = card.querySelector('.annotate-replies');
+    if (existing) existing.remove();
+
+    const replies = document.createElement('div');
+    replies.className = 'annotate-replies';
+
+    (thread.replies || []).filter(function (r) { return !r.deleted; }).forEach(function (r) {
+      const el = _buildReplyEl(r);
+      _wireReplyEl(el, r.id, card);
+      replies.appendChild(el);
+    });
+
+    card.appendChild(replies);
+
+    cardBody.querySelector('.annotate-reply-trigger').addEventListener('click', function () {
+      openReplyComposer(replies, card);
+    });
+  }
+
+  /**
+   * Create and mount a ThreadCard from a persisted Thread.
+   * Used by loadThreads() on page load.
+   */
+  function renderThreadCard(thread, mark) {
+    if (emptyMsg) emptyMsg.style.display = 'none';
+
+    const card = document.createElement('div');
+    card.className = 'annotate-card';
+    card._threadId = thread.id;
+
+    const unavailableBadge = mark ? '' : ' <span style="font-size:10px;color:#aaa;font-style:normal;">(highlight unavailable)</span>';
+    card.innerHTML = `
+      <div class="annotate-card-quote">${thread.quote}${unavailableBadge}</div>
+      <div class="annotate-card-body"></div>
+    `;
+
+    if (mark) {
+      card._annotationMark = mark;
+      mark.addEventListener('click', function () { openSidebar(); });
+    }
+
+    const headerHeight = document.getElementById('annotate-sidebar-header').offsetHeight;
+    if (mark) {
+      const rect = mark.getBoundingClientRect();
+      card._anchorTop = Math.max(0, rect.top + window.scrollY - headerHeight);
+    } else {
+      card._anchorTop = 8; // fallback — will be pushed below any real cards
+    }
+
+    sidebarBody.appendChild(card);
+    _renderSavedCard(card, thread);
+
+    if (thread.resolved) {
+      card.style.opacity = '0.4';
+      card.style.pointerEvents = 'none';
+    }
+
+    repositionCards();
+    observeCardResize(card);
+    return card;
+  }
+
+  /** Load all active threads for this page and render them with highlights */
+  function loadThreads(db) {
+    return dbGetThreads(db, _pageUrl).then(function (threads) {
+      if (threads.length > 0 && emptyMsg) emptyMsg.style.display = 'none';
+      threads.forEach(function (thread) {
+        const range = thread.anchor ? restoreRange(thread.anchor) : null;
+        const mark  = range ? highlightRange(range) : null;
+        renderThreadCard(thread, mark);
+      });
+    }).catch(function (e) { console.warn('Annotate.js: loadThreads failed', e); });
+  }
+
+  // --- New annotation card (composer → save → _renderSavedCard) ---
   function addAnnotationCard(selectedText, range) {
     if (emptyMsg) emptyMsg.style.display = 'none';
 
@@ -889,7 +1231,6 @@
       </div>
     `;
 
-    // Position card at the same vertical offset as the selection in the document.
     const headerHeight = document.getElementById('annotate-sidebar-header').offsetHeight;
     let pendingTop = 8;
     if (range) {
@@ -901,145 +1242,69 @@
     repositionCards();
     observeCardResize(card);
 
-    const textarea = card.querySelector('.annotate-card-composer');
-    const saveBtn = card.querySelector('.annotate-btn-save');
+    const textarea  = card.querySelector('.annotate-card-composer');
+    const saveBtn   = card.querySelector('.annotate-btn-save');
     const cancelBtn = card.querySelector('.annotate-btn-cancel');
 
-    setTimeout(() => textarea.focus(), 50);
+    setTimeout(function () { textarea.focus(); }, 50);
 
     saveBtn.addEventListener('click', function () {
-      const note = textarea.value.trim();
-      if (!note) return;
+      const body = textarea.value.trim();
+      if (!body) return;
 
-      // Highlight the annotated text
-      const mark = range ? highlightRange(range) : null;
-      if (mark) card._annotationMark = mark;
+      const author = ensureAuthor();
+      const now    = new Date().toISOString();
+
+      // ⚠️ Serialize BEFORE highlightRange — surroundContents mutates the DOM
+      const anchor = range ? serializeRange(range) : null;
+      const mark   = range ? highlightRange(range) : null;
+
       if (mark) {
+        card._annotationMark = mark;
         const markTop = Math.max(0, mark.getBoundingClientRect().top + window.scrollY - headerHeight);
-        card._anchorTop = markTop; // re-anchor to the actual highlight position
+        card._anchorTop = markTop;
         repositionCards();
       }
 
-      const createdAt = new Date();
+      const thread = {
+        id:         generateId(),
+        siteId:     _siteId,
+        pageUrl:    _pageUrl,
+        quote:      selectedText,
+        anchor:     anchor,
+        body:       body,
+        author:     author,
+        createdAt:  now,
+        updatedAt:  now,
+        resolved:   false,
+        resolvedAt: null,
+        resolvedBy: null,
+        replies:    [],
+        dirty:      true,
+        deletedAt:  null,
+      };
 
-      // Replace composer with saved card content
-      const cardBody = card.querySelector('.annotate-card-body');
-      cardBody.innerHTML = `
-        <div class="annotate-meta">
-          <div class="annotate-avatar">A</div>
-          <div class="annotate-meta-right">
-            <div class="annotate-author-row">
-              <span class="annotate-author">Anonymous</span>
-              <div class="annotate-author-row-right">
-                <span class="annotate-timestamp">${relativeTime(createdAt)}</span>
-                <button class="annotate-icon-btn annotate-menu-btn" title="More">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
-                </button>
-                <div class="annotate-dropdown hidden">
-                  <button class="annotate-dropdown-item annotate-edit-btn">Edit</button>
-                  <button class="annotate-dropdown-item danger annotate-delete-btn">Delete</button>
-                </div>
-              </div>
-            </div>
-            <p class="annotate-note-text">${note}</p>
-            <div class="annotate-action-row">
-              <button class="annotate-action-btn annotate-reply-trigger">Reply</button>
-              <button class="annotate-action-btn annotate-resolve-btn">Resolve</button>
-            </div>
-          </div>
-        </div>
-      `;
+      card._threadId = thread.id;
 
-      // Resolve
-      cardBody.querySelector('.annotate-resolve-btn').addEventListener('click', function () {
-        card.style.opacity = '0.4';
-        card.style.pointerEvents = 'none';
-      });
+      if (_db) {
+        dbSaveThread(_db, thread)
+          .then(function () {
+            return dbAddActivity(_db, makeActivity('thread_created', thread.id, null, author, 'created: \'' + body.slice(0, 40) + '\''));
+          })
+          .catch(function (e) { console.warn('Annotate.js: save failed', e); });
+      }
 
-      // Three-dot menu
-      const menuBtn = cardBody.querySelector('.annotate-menu-btn');
-      const dropdown = cardBody.querySelector('.annotate-dropdown');
-      menuBtn.addEventListener('click', function (e) {
-        e.stopPropagation();
-        dropdown.classList.toggle('hidden');
-      });
-      document.addEventListener('click', function () {
-        dropdown.classList.add('hidden');
-      });
-
-      // Edit
-      cardBody.querySelector('.annotate-edit-btn').addEventListener('click', function () {
-        dropdown.classList.add('hidden');
-        const noteEl = cardBody.querySelector('.annotate-note-text');
-        const currentText = noteEl.textContent;
-
-        const editor = document.createElement('div');
-        editor.innerHTML = `
-          <textarea class="annotate-card-composer" style="margin-top:8px;">${currentText}</textarea>
-          <div class="annotate-card-actions">
-            <button class="annotate-btn-cancel">Cancel</button>
-            <button class="annotate-btn-save">Save</button>
-          </div>
-        `;
-        noteEl.replaceWith(editor);
-        const editTextarea = editor.querySelector('textarea');
-        editTextarea.focus();
-        editTextarea.setSelectionRange(editTextarea.value.length, editTextarea.value.length);
-
-        editor.querySelector('.annotate-btn-save').addEventListener('click', function () {
-          const updated = editTextarea.value.trim();
-          if (!updated) return;
-          const newNote = document.createElement('p');
-          newNote.className = 'annotate-note-text';
-          newNote.textContent = updated;
-          editor.replaceWith(newNote);
-        });
-
-        editor.querySelector('.annotate-btn-cancel').addEventListener('click', function () {
-          const restored = document.createElement('p');
-          restored.className = 'annotate-note-text';
-          restored.textContent = currentText;
-          editor.replaceWith(restored);
-        });
-      });
-
-      // Delete
-      cardBody.querySelector('.annotate-delete-btn').addEventListener('click', function () {
-        if (card._annotationMark) {
-          const mark = card._annotationMark;
-          const parent = mark.parentNode;
-          if (parent) {
-            while (mark.firstChild) parent.insertBefore(mark.firstChild, mark);
-            parent.removeChild(mark);
-          }
-        }
-        card.remove();
-        if (!sidebarBody.querySelector('.annotate-card')) {
-          emptyMsg.style.display = '';
-        }
-      });
-
-      // Replies section
-      const replies = document.createElement('div');
-      replies.className = 'annotate-replies';
-      card.appendChild(replies);
-
-      // Wire up reply trigger from action row
-      cardBody.querySelector('.annotate-reply-trigger').addEventListener('click', function () {
-        openReplyComposer(replies);
-      });
+      _renderSavedCard(card, thread);
     });
 
     cancelBtn.addEventListener('click', function () {
       card.remove();
-      if (!sidebarBody.querySelector('.annotate-card')) {
-        emptyMsg.style.display = '';
-      }
+      if (!sidebarBody.querySelector('.annotate-card')) emptyMsg.style.display = '';
     });
   }
 
-  function openReplyComposer(replies) {
-    // Don't open a second composer
+  // --- Reply composer (appends to replies div, persists via card._threadId) ---
+  function openReplyComposer(replies, card) {
     if (replies.querySelector('.annotate-reply-composer')) return;
 
     const composerWrap = document.createElement('div');
@@ -1051,94 +1316,38 @@
         <button class="annotate-btn-save">Reply</button>
       </div>
     `;
-
     replies.appendChild(composerWrap);
 
     const textarea = composerWrap.querySelector('.annotate-reply-composer');
-    setTimeout(() => textarea.focus(), 50);
+    setTimeout(function () { textarea.focus(); }, 50);
 
     composerWrap.querySelector('.annotate-btn-save').addEventListener('click', function () {
       const text = textarea.value.trim();
       if (!text) return;
 
-      const replyEl = document.createElement('div');
-      replyEl.className = 'annotate-reply';
-      replyEl.innerHTML = `
-        <div class="annotate-meta">
-          <div class="annotate-avatar annotate-avatar-sm">A</div>
-          <div class="annotate-meta-right">
-            <div class="annotate-author-row">
-              <span class="annotate-author">Anonymous</span>
-              <div class="annotate-author-row-right">
-                <span class="annotate-timestamp">JUST NOW</span>
-                <button class="annotate-icon-btn annotate-menu-btn" title="More">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
-                </button>
-                <div class="annotate-dropdown hidden">
-                  <button class="annotate-dropdown-item annotate-edit-btn">Edit</button>
-                  <button class="annotate-dropdown-item danger annotate-delete-btn">Delete</button>
-                </div>
-              </div>
-            </div>
-            <p class="annotate-note-text" style="margin-bottom:0;">${text}</p>
-          </div>
-        </div>
-      `;
+      const author = ensureAuthor();
+      const reply  = {
+        id:        generateId(),
+        body:      text,
+        author:    author,
+        createdAt: new Date().toISOString(),
+        updatedAt: null,
+        deleted:   false,
+      };
 
-      // Three-dot menu toggle
-      const replyMenuBtn = replyEl.querySelector('.annotate-menu-btn');
-      const replyDropdown = replyEl.querySelector('.annotate-dropdown');
-      replyMenuBtn.addEventListener('click', function (e) {
-        e.stopPropagation();
-        replyDropdown.classList.toggle('hidden');
-      });
-      document.addEventListener('click', function () {
-        replyDropdown.classList.add('hidden');
-      });
+      if (_db) {
+        dbGetThread(_db, card._threadId).then(function (t) {
+          if (!t) return;
+          t.replies.push(reply);
+          t.dirty = true;
+          return dbSaveThread(_db, t).then(function () {
+            return dbAddActivity(_db, makeActivity('reply_added', t.id, reply.id, author, 'replied: \'' + text.slice(0, 40) + '\''));
+          });
+        }).catch(function (e) { console.warn('Annotate.js: reply persist failed', e); });
+      }
 
-      // Edit reply
-      replyEl.querySelector('.annotate-edit-btn').addEventListener('click', function () {
-        replyDropdown.classList.add('hidden');
-        const noteEl = replyEl.querySelector('.annotate-note-text');
-        const currentText = noteEl.textContent;
-
-        const editor = document.createElement('div');
-        editor.innerHTML = `
-          <textarea class="annotate-reply-composer" style="margin-top:6px;">${currentText}</textarea>
-          <div class="annotate-card-actions">
-            <button class="annotate-btn-cancel">Cancel</button>
-            <button class="annotate-btn-save">Save</button>
-          </div>
-        `;
-        noteEl.replaceWith(editor);
-        const editTextarea = editor.querySelector('textarea');
-        editTextarea.focus();
-        editTextarea.setSelectionRange(editTextarea.value.length, editTextarea.value.length);
-
-        editor.querySelector('.annotate-btn-save').addEventListener('click', function () {
-          const updated = editTextarea.value.trim();
-          if (!updated) return;
-          const newNote = document.createElement('p');
-          newNote.className = 'annotate-note-text';
-          newNote.style.marginBottom = '0';
-          newNote.textContent = updated;
-          editor.replaceWith(newNote);
-        });
-
-        editor.querySelector('.annotate-btn-cancel').addEventListener('click', function () {
-          const restored = document.createElement('p');
-          restored.className = 'annotate-note-text';
-          restored.style.marginBottom = '0';
-          restored.textContent = currentText;
-          editor.replaceWith(restored);
-        });
-      });
-
-      // Delete reply
-      replyEl.querySelector('.annotate-delete-btn').addEventListener('click', function () {
-        replyEl.remove();
-      });
-
+      const replyEl = _buildReplyEl(reply);
+      _wireReplyEl(replyEl, reply.id, card);
       replies.insertBefore(replyEl, composerWrap);
       composerWrap.remove();
     });
@@ -1212,5 +1421,15 @@
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape') hideCommentBtn();
   });
+
+  // ── Initialise ────────────────────────────────────────────────────────────
+  openDB(_siteId)
+    .then(function (db) {
+      _db = db;
+      return loadThreads(db);
+    })
+    .catch(function (err) {
+      console.warn('Annotate.js: IndexedDB unavailable — running in memory-only mode', err);
+    });
 
 })();
