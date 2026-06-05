@@ -1202,9 +1202,15 @@
     return card;
   }
 
-  /** Load all active threads for this page and render them with highlights */
+  /** Load all threads (active + resolved) for this page and render them with highlights */
   function loadThreads(db) {
-    return dbGetThreads(db, _pageUrl).then(function (threads) {
+    return Promise.all([
+      dbGetThreads(db, _pageUrl),
+      dbGetResolvedThreads(db, _pageUrl),
+    ]).then(function (results) {
+      const threads = results[0].concat(results[1])
+        .sort(function (a, b) { return a.createdAt.localeCompare(b.createdAt); });
+
       if (threads.length > 0 && emptyMsg) emptyMsg.style.display = 'none';
       threads.forEach(function (thread) {
         const range = thread.anchor ? restoreRange(thread.anchor) : null;
