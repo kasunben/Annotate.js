@@ -1560,8 +1560,11 @@
         return;
       }
 
-      // New active thread from another user — render a fresh card
+      // New active thread from another user — render a fresh card.
+      // Guard: if the id is already tracked (e.g. a locally-created card), skip
+      // to avoid duplicating a thread we already rendered.
       if (!existingCard) {
+        if (_renderedThreadIds.has(st.id)) return;
         var nr = st.anchor ? restoreRange(st.anchor) : null;
         var nm = nr ? highlightRange(nr) : null;
         renderThreadCard(st, nm);
@@ -1725,7 +1728,13 @@
         deletedAt:  null,
       };
 
+      // Register card identity exactly as renderThreadCard does, so the next
+      // pull recognises this thread as already-rendered and does not create a
+      // duplicate. Without dataset.threadId, _rerenderAfterPull's querySelector
+      // misses this card and re-renders it as a "new" thread.
       card._threadId = thread.id;
+      card.dataset.threadId = thread.id;
+      _renderedThreadIds.add(thread.id);
 
       if (_db) {
         dbSaveThread(_db, thread)
