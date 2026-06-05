@@ -26,7 +26,8 @@ app.use(express.json());
 // Serve demo/ and assets/ from the project root
 app.use(express.static(path.join(__dirname, '..')));
 
-app.use('/threads', require('./routes/threads'));
+app.use('/threads',  require('./routes/threads'));
+app.use('/activity', require('./routes/activity'));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, function () {

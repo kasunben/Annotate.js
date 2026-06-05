@@ -33,6 +33,26 @@ db.exec(`
     ON threads (site_id, page_url, updated_at);
 `);
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS activity (
+    id         TEXT PRIMARY KEY,
+    site_id    TEXT NOT NULL,
+    page_url   TEXT NOT NULL,
+    type       TEXT NOT NULL,
+    thread_id  TEXT NOT NULL,
+    reply_id   TEXT,
+    actor      TEXT NOT NULL,
+    timestamp  TEXT NOT NULL,
+    snapshot   TEXT NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_activity_page
+    ON activity (site_id, page_url);
+
+  CREATE INDEX IF NOT EXISTS idx_activity_ts
+    ON activity (site_id, page_url, timestamp);
+`);
+
 /** Convert a SQLite row to a Thread object matching the client data model */
 function rowToThread(row) {
   return {
@@ -73,4 +93,19 @@ function threadToRow(thread) {
   };
 }
 
-module.exports = { db, rowToThread, threadToRow };
+/** Convert a SQLite row to an ActivityEntry object matching the client data model */
+function rowToActivity(row) {
+  return {
+    id:        row.id,
+    siteId:    row.site_id,
+    pageUrl:   row.page_url,
+    type:      row.type,
+    threadId:  row.thread_id,
+    replyId:   row.reply_id || null,
+    actor:     row.actor,
+    timestamp: row.timestamp,
+    snapshot:  row.snapshot,
+  };
+}
+
+module.exports = { db, rowToThread, threadToRow, rowToActivity };

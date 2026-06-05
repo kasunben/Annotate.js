@@ -283,7 +283,8 @@
   const _pageUrl  = normalizeUrl(window.location.href);
   const _syncUrl  = (document.currentScript && document.currentScript.dataset.syncUrl) || null;
   let   _db       = null; // IDBDatabase — set by init(); null = memory-only mode
-  let   _lastSync = null; // ISO 8601 — max updatedAt seen from server; drives incremental pulls
+  let   _lastSync         = null; // ISO 8601 — max updatedAt seen from server; drives incremental pulls
+  let   _lastActivitySync = null; // ISO 8601 — max timestamp seen from server; drives activity incremental pulls
 
   console.log('Annotate.js loaded — site:', _siteId);
 
@@ -1014,6 +1015,14 @@
     };
   }
 
+  /** Save an activity entry to IDB and push to server (no-op push when offline) */
+  function logActivity(type, threadId, replyId, actor, snapshot) {
+    var entry = makeActivity(type, threadId, replyId, actor, snapshot);
+    return dbAddActivity(_db, entry).then(function () {
+      syncActivity(entry);
+    });
+  }
+
   // --- Shared UI helpers ---
   const _MENU_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>';
 
@@ -1165,7 +1174,7 @@
             if (r) { r.body = updated; r.updatedAt = new Date().toISOString(); t.updatedAt = new Date().toISOString(); t.dirty = true; }
             return dbSaveThread(_db, t).then(function () {
               syncThread(t);
-              return dbAddActivity(_db, makeActivity('reply_edited', t.id, replyId, r ? r.author : '', 'edited reply'));
+              return logActivity('reply_edited', t.id, replyId, r ? r.author : '', 'edited reply');
             });
           }).catch(function (e) { console.warn('Annotate.js: reply edit persist failed', e); });
         }
@@ -1194,7 +1203,7 @@
           if (r) { r.deleted = true; t.updatedAt = new Date().toISOString(); t.dirty = true; }
           return dbSaveThread(_db, t).then(function () {
             syncThread(t);
-            return dbAddActivity(_db, makeActivity('reply_deleted', t.id, replyId, r ? r.author : '', 'deleted reply'));
+            return logActivity('reply_deleted', t.id, replyId, r ? r.author : '', 'deleted reply');
           });
         }).catch(function (e) { console.warn('Annotate.js: reply delete persist failed', e); });
       }
@@ -1245,7 +1254,7 @@
           t.resolved = true; t.resolvedAt = new Date().toISOString(); t.resolvedBy = who; t.updatedAt = new Date().toISOString(); t.dirty = true;
           return dbSaveThread(_db, t).then(function () {
             syncThread(t);
-            return dbAddActivity(_db, makeActivity('thread_resolved', t.id, null, who, 'resolved thread'));
+            return logActivity('thread_resolved', t.id, null, who, 'resolved thread');
           });
         }).catch(function (e) { console.warn('Annotate.js: resolve persist failed', e); });
       }
@@ -1281,7 +1290,7 @@
             t.body = updated; t.updatedAt = new Date().toISOString(); t.dirty = true;
             return dbSaveThread(_db, t).then(function () {
               syncThread(t);
-              return dbAddActivity(_db, makeActivity('thread_edited', t.id, null, t.author, 'edited: \'' + updated.slice(0, 40) + '\''));
+              return logActivity('thread_edited', t.id, null, t.author, 'edited: \'' + updated.slice(0, 40) + '\'');
             });
           }).catch(function (e) { console.warn('Annotate.js: edit persist failed', e); });
         }
@@ -1305,7 +1314,7 @@
         dbDeleteThread(_db, thread.id)
           .then(function () {
             dbGetThread(_db, thread.id).then(function (t) { if (t) syncThread(t); });
-            return dbAddActivity(_db, makeActivity('thread_deleted', thread.id, null, getAuthor(), 'deleted thread'));
+            return logActivity('thread_deleted', thread.id, null, getAuthor(), 'deleted thread');
           })
           .catch(function (e) { console.warn('Annotate.js: delete persist failed', e); });
       }
@@ -1474,7 +1483,10 @@
     _panelSettings.querySelector('#annotate-clear-btn').addEventListener('click', function () {
       if (!window.confirm('Delete all annotations and activity for this site? This cannot be undone.')) return;
       var serverClear = _syncUrl
-        ? fetch(_syncUrl + '/threads?siteId=' + encodeURIComponent(_siteId), { method: 'DELETE' })
+        ? Promise.all([
+            fetch(_syncUrl + '/threads?siteId='  + encodeURIComponent(_siteId), { method: 'DELETE' }),
+            fetch(_syncUrl + '/activity?siteId=' + encodeURIComponent(_siteId), { method: 'DELETE' }),
+          ])
         : Promise.resolve();
       serverClear
         .then(function () { return dbClearAll(_siteId, _db); })
@@ -1492,6 +1504,42 @@
   function _unwrapMark(mark) {
     var p = mark.parentNode;
     if (p) { while (mark.firstChild) p.insertBefore(mark.firstChild, mark); p.removeChild(mark); }
+  }
+
+  /** Push one activity entry to the server. Fire-and-forget. */
+  function syncActivity(entry) {
+    if (!_syncUrl) return;
+    fetch(_syncUrl + '/activity', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(entry),
+    }).catch(function () {});
+  }
+
+  /**
+   * Pull activity entries from the server since _lastActivitySync, merge into
+   * IDB. The Activity tab reads IDB directly, so no re-render is needed here.
+   */
+  function pullActivity() {
+    if (!_syncUrl || !_db) return Promise.resolve();
+    var url = _syncUrl + '/activity?siteId=' + encodeURIComponent(_siteId)
+            + '&pageUrl=' + encodeURIComponent(_pageUrl)
+            + (_lastActivitySync ? '&since=' + encodeURIComponent(_lastActivitySync) : '');
+    return fetch(url)
+      .then(function (r) { return r.json(); })
+      .then(function (entries) {
+        if (!entries.length) return;
+        var maxTs = _lastActivitySync || '';
+        return entries.reduce(function (p, entry) {
+          return p.then(function () {
+            if (entry.timestamp > maxTs) maxTs = entry.timestamp;
+            return dbAddActivity(_db, entry);
+          });
+        }, Promise.resolve()).then(function () {
+          _lastActivitySync = maxTs;
+        });
+      })
+      .catch(function () {});
   }
 
   /**
@@ -1740,7 +1788,7 @@
         dbSaveThread(_db, thread)
           .then(function () {
             syncThread(thread);
-            return dbAddActivity(_db, makeActivity('thread_created', thread.id, null, author, 'created: \'' + body.slice(0, 40) + '\''));
+            return logActivity('thread_created', thread.id, null, author, 'created: \'' + body.slice(0, 40) + '\'');
           })
           .catch(function (e) { console.warn('Annotate.js: save failed', e); });
       }
@@ -1794,7 +1842,7 @@
           t.dirty = true;
           return dbSaveThread(_db, t).then(function () {
             syncThread(t);
-            return dbAddActivity(_db, makeActivity('reply_added', t.id, reply.id, author, 'replied: \'' + text.slice(0, 40) + '\''));
+            return logActivity('reply_added', t.id, reply.id, author, 'replied: \'' + text.slice(0, 40) + '\'');
           });
         }).catch(function (e) { console.warn('Annotate.js: reply persist failed', e); });
       }
@@ -1884,10 +1932,11 @@
     .then(function () {
       if (_syncUrl) {
         pullThreads();
+        pullActivity();
         flushDirtyThreads();
-        setInterval(pullThreads, 30000);
+        setInterval(function () { pullThreads(); pullActivity(); }, 30000);
         document.addEventListener('visibilitychange', function () {
-          if (document.visibilityState === 'visible') pullThreads();
+          if (document.visibilityState === 'visible') { pullThreads(); pullActivity(); }
         });
       }
     })
