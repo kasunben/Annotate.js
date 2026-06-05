@@ -7,7 +7,9 @@ Lightweight vanilla JS library that adds inline annotation and threaded comments
 ```
 Annotate.js/
 ├── assets/js/annotate.js   # Entire library (single IIFE — DB layer + anchor + sync + UI all inlined)
-├── demo/demo.html           # Manual test harness / integration example
+├── demo/
+│   ├── demo.html                    # Offline-only test harness (no data-sync-url)
+│   └── demo-sync-with-server.html  # Multi-user sync test harness (data-sync-url set)
 ├── server/
 │   ├── index.js             # Express entry point; also serves static files
 │   ├── db.js                # node:sqlite setup, schema migrations, rowToThread/threadToRow
@@ -15,7 +17,10 @@ Annotate.js/
 │   └── data/                # annotate.db lives here (gitignored)
 ├── package.json             # express + cors only (node:sqlite is built-in)
 ├── README.md
-└── docs/annotate-js-concept.md  # Phase 1 spec & architecture decisions
+└── docs/
+    ├── screenshot.png           # UI mockup for README
+    ├── philosophy.md            # "Marginal Dialogue" design philosophy behind the mockup
+    └── annotate-js-concept.md  # Phase 1 spec & architecture decisions
 ```
 
 The client distributes as a **single JS file**. The server is optional — omit `data-sync-url` to run offline-only.
@@ -308,3 +313,4 @@ Test checklist for any change:
 - **`_lastRenderedAt`** — stored on each card DOM element; `_rerenderAfterPull` skips re-render if `updatedAt` hasn't changed
 - **`updatedAt` on every mutation** — all mutations (reply add/edit/delete, resolve, thread delete) must bump `t.updatedAt = new Date().toISOString()` before saving; the `?since` incremental pull filters by `updated_at > _lastSync`, so any mutation that skips this is invisible to other users
 - **`dbClearAll(siteId, db)`** — pass the open `_db` connection to clear stores via `readwrite` transaction instead of `deleteDatabase`; `deleteDatabase` is blocked by the tab's own open connection, causing the reload to never fire; falls back to `deleteDatabase` (with `onblocked → resolve` safety net) when no connection is available
+- **card identity — two paths must stay in sync** — `renderThreadCard` and `addAnnotationCard` both create cards; both must set `card._threadId`, `card.dataset.threadId`, and `_renderedThreadIds.add(id)`; if `addAnnotationCard` omits `dataset.threadId` or the Set entry, `_rerenderAfterPull` treats the locally-created thread as new-from-server on the next pull, producing duplicate cards, re-applied highlights (marks move/vanish), and replies landing on the wrong card
