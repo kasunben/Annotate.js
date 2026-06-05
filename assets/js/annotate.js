@@ -4,15 +4,16 @@
   // --- Styles ---
   const style = document.createElement('style');
   style.textContent = `
+    /* ===================== SIDEBAR ===================== */
     #annotate-sidebar {
       position: absolute;
       top: 0;
       right: 0;
-      width: 320px;
+      width: 360px;
       min-height: 100%;
-      background: #fff;
-      border-left: 1px solid #e0e0e0;
-      box-shadow: -2px 0 8px rgba(0,0,0,0.08);
+      background: #f4f5f7;
+      border-left: 1px solid #e0e4ea;
+      box-shadow: -2px 0 16px rgba(0,0,0,0.07);
       z-index: 9999;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       font-size: 14px;
@@ -20,101 +21,261 @@
     }
 
     #annotate-sidebar.collapsed {
-      transform: translateX(320px);
+      transform: translateX(360px);
     }
 
+    /* ===================== HEADER ===================== */
     #annotate-sidebar-header {
       position: sticky;
       top: 0;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 16px;
-      border-bottom: 1px solid #e0e0e0;
-      font-weight: 600;
-      color: #1a1a1a;
       background: #fff;
+      border-bottom: 1px solid #e8eaed;
       z-index: 1;
     }
 
+    .annotate-header-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 12px 10px 16px;
+    }
+
+    .annotate-header-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: #111;
+      letter-spacing: -0.015em;
+      text-transform: uppercase;
+    }
+
+    .annotate-header-icons {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+    }
+
+    .annotate-header-icon-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: #6b7280;
+      padding: 5px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.15s, color 0.15s;
+    }
+
+    .annotate-header-icon-btn:hover {
+      background: #f3f4f6;
+      color: #111;
+    }
+
+    /* ===================== TABS ===================== */
+    .annotate-tabs {
+      display: flex;
+      padding: 0 6px;
+    }
+
+    .annotate-tab {
+      padding: 8px 10px 7px;
+      font-size: 12.5px;
+      font-weight: 500;
+      color: #9ca3af;
+      border: none;
+      background: none;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -1px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      transition: color 0.15s;
+    }
+
+    .annotate-tab.active {
+      color: #111;
+      border-bottom-color: #111;
+      font-weight: 600;
+    }
+
+    .annotate-tab:hover:not(.active) {
+      color: #374151;
+    }
+
+    /* ===================== BODY ===================== */
     #annotate-sidebar-body {
       position: relative;
-      color: #666;
+      padding-top: 10px;
     }
 
     #annotate-empty {
       position: absolute;
-      top: 16px;
-      left: 16px;
-      color: #999;
+      top: 24px;
+      left: 0;
+      right: 0;
+      text-align: center;
+      color: #9ca3af;
       font-size: 13px;
     }
 
+    /* ===================== CARDS ===================== */
     .annotate-card {
       position: absolute;
-      left: 12px;
-      right: 12px;
-      border: 1px solid #e8e8e8;
-      border-radius: 8px;
-      overflow: hidden;
+      left: 10px;
+      right: 10px;
+      border: 1px solid #e4e7eb;
+      border-radius: 10px;
       background: #fff;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.06);
     }
 
+    /* ===================== QUOTE ===================== */
     .annotate-card-quote {
-      background: #f9f6f0;
+      background: #fdf8f0;
       border-left: 3px solid #d4a843;
+      border-radius: 10px 10px 0 0;
       padding: 8px 12px;
       font-size: 12px;
-      color: #777;
+      color: #6b5c3e;
       font-style: italic;
       line-height: 1.5;
     }
 
+    /* ===================== CARD BODY ===================== */
     .annotate-card-body {
       padding: 12px;
     }
 
+    /* ===================== META ROW ===================== */
     .annotate-meta {
       display: flex;
-      align-items: center;
-      gap: 10px;
-      margin-bottom: 10px;
-      position: relative;
+      align-items: flex-start;
+      gap: 9px;
+      margin-bottom: 0;
     }
 
-    .annotate-card-actions-meta {
+    .annotate-avatar {
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      font-weight: 700;
+      color: #fff;
+      flex-shrink: 0;
+      background: #1a1a1a;
+    }
+
+    .annotate-avatar-sm {
+      width: 26px;
+      height: 26px;
+      font-size: 10px;
+      margin-top: 1px;
+    }
+
+    .annotate-meta-right {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .annotate-author-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+      margin-bottom: 4px;
+    }
+
+    .annotate-author {
+      font-size: 13px;
+      font-weight: 600;
+      color: #111;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .annotate-author-row-right {
       display: flex;
       align-items: center;
       gap: 2px;
-      margin-left: auto;
+      flex-shrink: 0;
+      position: relative;
     }
 
+    .annotate-timestamp {
+      font-size: 10.5px;
+      color: #9ca3af;
+      font-weight: 500;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    /* ===================== NOTE TEXT ===================== */
+    .annotate-note-text {
+      font-size: 13px;
+      color: #374151;
+      line-height: 1.6;
+      margin: 0 0 9px;
+    }
+
+    /* ===================== INLINE ACTION ROW ===================== */
+    .annotate-action-row {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .annotate-action-btn {
+      background: none;
+      border: none;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.07em;
+      color: #9ca3af;
+      cursor: pointer;
+      padding: 0;
+      text-transform: uppercase;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      transition: color 0.15s;
+    }
+
+    .annotate-action-btn:hover {
+      color: #374151;
+    }
+
+    /* ===================== ICON BUTTONS ===================== */
     .annotate-icon-btn {
       background: none;
       border: none;
       cursor: pointer;
-      color: #aaa;
-      padding: 4px;
+      color: #d1d5db;
+      padding: 3px;
       border-radius: 4px;
       display: flex;
       align-items: center;
       justify-content: center;
       line-height: 1;
+      transition: background 0.15s, color 0.15s;
     }
 
     .annotate-icon-btn:hover {
-      background: #f0f0f0;
-      color: #333;
+      background: #f3f4f6;
+      color: #6b7280;
     }
 
+    /* ===================== DROPDOWN ===================== */
     .annotate-dropdown {
       position: absolute;
       top: 100%;
       right: 0;
       background: #fff;
-      border: 1px solid #e0e0e0;
-      border-radius: 6px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.1);
       z-index: 10002;
       min-width: 140px;
       padding: 4px 0;
@@ -144,57 +305,28 @@
     }
 
     .annotate-dropdown-item.danger {
-      color: #d00;
+      color: #dc2626;
     }
 
-    .annotate-avatar {
-      width: 30px;
-      height: 30px;
-      border-radius: 50%;
-      background: #d0d0d0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 12px;
-      font-weight: 700;
-      color: #fff;
-      flex-shrink: 0;
-      background: linear-gradient(135deg, #667eea, #764ba2);
-    }
-
-    .annotate-meta-text {
-      display: flex;
-      flex-direction: column;
-      gap: 1px;
-    }
-
-    .annotate-author {
-      font-size: 13px;
-      font-weight: 600;
-      color: #1a1a1a;
-    }
-
-    .annotate-timestamp {
-      font-size: 11px;
-      color: #999;
-    }
-
+    /* ===================== COMPOSER ===================== */
     .annotate-card-composer {
       width: 100%;
       box-sizing: border-box;
-      border: 1px solid #e0e0e0;
-      border-radius: 6px;
-      padding: 8px;
+      border: 1px solid #e5e7eb;
+      border-radius: 7px;
+      padding: 8px 10px;
       font-size: 13px;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       resize: none;
       outline: none;
-      color: #1a1a1a;
+      color: #111;
       min-height: 64px;
+      background: #fafafa;
     }
 
     .annotate-card-composer:focus {
       border-color: #1a1a1a;
+      background: #fff;
     }
 
     .annotate-card-actions {
@@ -207,102 +339,74 @@
     .annotate-btn-cancel {
       background: none;
       border: 1px solid #e0e0e0;
-      border-radius: 5px;
-      padding: 5px 12px;
+      border-radius: 6px;
+      padding: 5px 14px;
       font-size: 12px;
       cursor: pointer;
       color: #555;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      transition: background 0.15s;
     }
 
     .annotate-btn-save {
       background: #1a1a1a;
       border: none;
-      border-radius: 5px;
-      padding: 5px 12px;
+      border-radius: 6px;
+      padding: 5px 14px;
       font-size: 12px;
       cursor: pointer;
       color: #fff;
       font-weight: 600;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      transition: background 0.15s;
     }
 
     .annotate-btn-save:hover { background: #333; }
     .annotate-btn-cancel:hover { background: #f5f5f5; }
 
+    /* ===================== HIGHLIGHT ===================== */
     .annotate-highlight {
       background: #fde68a;
       border-radius: 2px;
     }
 
-    .annotate-note-text {
-      font-size: 13px;
-      color: #1a1a1a;
-      line-height: 1.6;
-      margin: 0;
-    }
-
+    /* ===================== REPLIES ===================== */
     .annotate-replies {
-      border-top: 1px solid #f0f0f0;
+      border-top: 1px solid #f3f4f6;
     }
 
     .annotate-reply {
       padding: 10px 12px;
-      border-top: 1px solid #f0f0f0;
+      border-top: 1px solid #f3f4f6;
     }
 
     .annotate-reply-action {
       padding: 8px 12px;
-      border-top: 1px solid #f0f0f0;
-    }
-
-    .annotate-reply-input {
-      width: 100%;
-      box-sizing: border-box;
-      border: 1px solid #e8e8e8;
-      border-radius: 20px;
-      padding: 8px 14px;
-      font-size: 13px;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      outline: none;
-      color: #1a1a1a;
-      background: #f7f7f7;
-      cursor: pointer;
-      text-align: left;
-      color: #aaa;
-    }
-
-    .annotate-reply-link {
-      background: none;
-      border: none;
-      font-size: 12px;
-      color: #888;
-      cursor: pointer;
-      padding: 0;
-      text-decoration: underline;
-    }
-
-    .annotate-reply-link:hover {
-      color: #1a1a1a;
+      border-top: 1px solid #f3f4f6;
     }
 
     .annotate-reply-composer {
       width: 100%;
       box-sizing: border-box;
-      border: 1px solid #e0e0e0;
-      border-radius: 6px;
-      padding: 6px 8px;
+      border: 1px solid #e5e7eb;
+      border-radius: 7px;
+      padding: 6px 10px;
       font-size: 13px;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       resize: none;
       outline: none;
-      color: #1a1a1a;
+      color: #111;
       min-height: 52px;
       margin-bottom: 6px;
+      background: #fafafa;
     }
 
     .annotate-reply-composer:focus {
       border-color: #1a1a1a;
+      background: #fff;
     }
 
+    /* ===================== TOGGLE BUTTON ===================== */
     #annotate-toggle {
       position: fixed;
       top: 50%;
@@ -312,21 +416,23 @@
       color: #fff;
       border: none;
       border-radius: 6px 0 0 6px;
-      padding: 10px 6px;
+      padding: 10px 8px;
       cursor: pointer;
       z-index: 10000;
       writing-mode: vertical-rl;
       letter-spacing: 0.05em;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      font-size: 11px;
+      font-size: 10px;
       font-weight: 600;
       transition: right 0.25s ease;
+      text-transform: uppercase;
     }
 
     #annotate-toggle.sidebar-open {
-      right: 320px;
+      right: 360px;
     }
 
+    /* ===================== FLOATING COMMENT BUTTON ===================== */
     #annotate-comment-btn {
       position: fixed;
       background: #1a1a1a;
@@ -340,6 +446,7 @@
       align-items: center;
       justify-content: center;
       box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+      transition: background 0.15s;
     }
 
     #annotate-comment-btn.hidden {
@@ -360,17 +467,47 @@
   sidebar.id = 'annotate-sidebar';
   sidebar.innerHTML = `
     <div id="annotate-sidebar-header">
-      <span>Annotations</span>
-      <button id="annotate-close" style="background:none;border:none;cursor:pointer;font-size:18px;color:#666;">&times;</button>
+      <div class="annotate-header-top">
+        <span class="annotate-header-title">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:6px;"><path d="M16 10a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 14.286V4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/><path d="M20 9a2 2 0 0 1 2 2v10.286a.71.71 0 0 1-1.212.502l-2.202-2.202A2 2 0 0 0 17.172 19H10a2 2 0 0 1-2-2v-1"/></svg>Discussion
+        </span>
+        <div class="annotate-header-icons">
+          <button class="annotate-header-icon-btn" title="Search">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+          </button>
+          <button class="annotate-header-icon-btn" title="Filter">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="6" x2="16" y2="6"/><line x1="8" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="14" y2="18"/></svg>
+          </button>
+          <button id="annotate-close" class="annotate-header-icon-btn" title="Close">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="annotate-tabs">
+        <button class="annotate-tab active">Threads</button>
+        <button class="annotate-tab">Resolved</button>
+        <button class="annotate-tab">Activity</button>
+        <button class="annotate-tab">Settings</button>
+      </div>
     </div>
     <div id="annotate-sidebar-body">
-      <span id="annotate-empty">No annotations yet.</span>
+      <span id="annotate-empty">No threads yet.</span>
     </div>
   `;
   document.documentElement.appendChild(sidebar);
 
   const sidebarBody = document.getElementById('annotate-sidebar-body');
   const emptyMsg = document.getElementById('annotate-empty');
+
+  // Tab switching (visual only for now)
+  sidebar.querySelectorAll('.annotate-tab').forEach(function (tab) {
+    tab.addEventListener('click', function () {
+      sidebar.querySelectorAll('.annotate-tab').forEach(function (t) {
+        t.classList.remove('active');
+      });
+      tab.classList.add('active');
+    });
+  });
 
   // --- Toggle button ---
   const toggle = document.createElement('button');
@@ -397,6 +534,72 @@
 
   // Start collapsed
   closeSidebar();
+
+  // --- Relative timestamp helper ---
+  function relativeTime(date) {
+    const diff = Math.floor((Date.now() - date) / 1000);
+    if (diff < 60) return 'JUST NOW';
+    if (diff < 3600) return Math.floor(diff / 60) + 'M AGO';
+    if (diff < 86400) return Math.floor(diff / 3600) + 'H AGO';
+    return Math.floor(diff / 86400) + 'D AGO';
+  }
+
+  // --- Resolve card top to avoid overlapping existing cards ---
+  function resolveCardTop(desiredTop, newCard) {
+    const gap = 8;
+    let top = desiredTop;
+    const others = Array.from(sidebarBody.querySelectorAll('.annotate-card'))
+      .filter(function (c) { return c !== newCard; })
+      .sort(function (a, b) { return (parseInt(a.style.top) || 0) - (parseInt(b.style.top) || 0); });
+
+    // Keep iterating until no overlap remains (handles cascading pushes)
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const other of others) {
+        const otherTop = parseInt(other.style.top, 10) || 0;
+        const otherBottom = otherTop + other.offsetHeight;
+        if (top < otherBottom + gap && top + newCard.offsetHeight > otherTop) {
+          top = otherBottom + gap;
+          changed = true;
+        }
+      }
+    }
+    return top;
+  }
+
+  // --- Re-position all cards based on their anchors ---
+  // Each card stores _anchorTop — the ideal vertical position aligned with its highlight.
+  // Cards are sorted by anchor, then placed greedily: each card sits at its anchor or
+  // immediately below the previous card (+ gap), whichever is lower.
+  // This means cards push down when a neighbour grows and spring back when it shrinks.
+  function repositionCards() {
+    const gap = 8;
+    const cards = Array.from(sidebarBody.querySelectorAll('.annotate-card'))
+      .sort(function (a, b) { return (a._anchorTop || 0) - (b._anchorTop || 0); });
+
+    let floor = 0;
+    for (const card of cards) {
+      const ideal = card._anchorTop || 0;
+      const top = Math.max(ideal, floor);
+      card.style.top = top + 'px';
+      floor = top + card.offsetHeight + gap;
+    }
+
+    if (cards.length > 0) {
+      const last = cards[cards.length - 1];
+      sidebarBody.style.minHeight = ((parseInt(last.style.top) || 0) + last.offsetHeight + 16) + 'px';
+    }
+  }
+
+  // Watch a card for height changes and re-position all cards automatically
+  function observeCardResize(card) {
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(function () {
+      requestAnimationFrame(repositionCards);
+    });
+    ro.observe(card);
+  }
 
   // --- Add annotation card to sidebar ---
   function highlightRange(range) {
@@ -428,68 +631,67 @@
     `;
 
     // Position card at the same vertical offset as the selection in the document.
-    // Cards are inside #annotate-sidebar-body which starts below the sticky header,
-    // so subtract the header height to keep card aligned with the highlight.
     const headerHeight = document.getElementById('annotate-sidebar-header').offsetHeight;
     let pendingTop = 8;
     if (range) {
       const rect = range.getBoundingClientRect();
       pendingTop = Math.max(0, rect.top + window.scrollY - headerHeight);
     }
-    card.style.top = pendingTop + 'px';
-
     sidebarBody.appendChild(card);
-    sidebarBody.style.minHeight = (pendingTop + 200) + 'px';
+    card._anchorTop = pendingTop;
+    repositionCards();
+    observeCardResize(card);
 
     const textarea = card.querySelector('.annotate-card-composer');
     const saveBtn = card.querySelector('.annotate-btn-save');
     const cancelBtn = card.querySelector('.annotate-btn-cancel');
 
-    // Focus the textarea
     setTimeout(() => textarea.focus(), 50);
 
     saveBtn.addEventListener('click', function () {
       const note = textarea.value.trim();
       if (!note) return;
 
-      // Highlight the annotated text and position card at the same doc offset
+      // Highlight the annotated text
       const mark = range ? highlightRange(range) : null;
       if (mark) card._annotationMark = mark;
       if (mark) {
-        const markTop = mark.getBoundingClientRect().top + window.scrollY - headerHeight;
-        card.style.top = Math.max(0, markTop) + 'px';
-        sidebarBody.style.minHeight = (markTop + card.offsetHeight + 16) + 'px';
+        const markTop = Math.max(0, mark.getBoundingClientRect().top + window.scrollY - headerHeight);
+        card._anchorTop = markTop; // re-anchor to the actual highlight position
+        repositionCards();
       }
 
-      const now = new Date();
-      const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const createdAt = new Date();
 
-      // Replace composer with saved note + replies section
+      // Replace composer with saved card content
       const cardBody = card.querySelector('.annotate-card-body');
       cardBody.innerHTML = `
         <div class="annotate-meta">
           <div class="annotate-avatar">A</div>
-          <div class="annotate-meta-text">
-            <span class="annotate-author">Anonymous</span>
-            <span class="annotate-timestamp">${timeStr} · Today</span>
-          </div>
-          <div class="annotate-card-actions-meta">
-            <button class="annotate-icon-btn annotate-resolve-btn" title="Resolve">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-            </button>
-            <button class="annotate-icon-btn annotate-menu-btn" title="More">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
-            </button>
-            <div class="annotate-dropdown hidden">
-              <button class="annotate-dropdown-item annotate-edit-btn">Edit</button>
-              <button class="annotate-dropdown-item danger">Delete</button>
+          <div class="annotate-meta-right">
+            <div class="annotate-author-row">
+              <span class="annotate-author">Anonymous</span>
+              <div class="annotate-author-row-right">
+                <span class="annotate-timestamp">${relativeTime(createdAt)}</span>
+                <button class="annotate-icon-btn annotate-menu-btn" title="More">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+                </button>
+                <div class="annotate-dropdown hidden">
+                  <button class="annotate-dropdown-item annotate-edit-btn">Edit</button>
+                  <button class="annotate-dropdown-item danger annotate-delete-btn">Delete</button>
+                </div>
+              </div>
+            </div>
+            <p class="annotate-note-text">${note}</p>
+            <div class="annotate-action-row">
+              <button class="annotate-action-btn annotate-reply-trigger">Reply</button>
+              <button class="annotate-action-btn annotate-resolve-btn">Resolve</button>
             </div>
           </div>
         </div>
-        <p class="annotate-note-text">${note}</p>
       `;
 
-      // Resolve button
+      // Resolve
       cardBody.querySelector('.annotate-resolve-btn').addEventListener('click', function () {
         card.style.opacity = '0.4';
         card.style.pointerEvents = 'none';
@@ -512,7 +714,6 @@
         const noteEl = cardBody.querySelector('.annotate-note-text');
         const currentText = noteEl.textContent;
 
-        // Replace note with inline editor
         const editor = document.createElement('div');
         editor.innerHTML = `
           <textarea class="annotate-card-composer" style="margin-top:8px;">${currentText}</textarea>
@@ -522,12 +723,12 @@
           </div>
         `;
         noteEl.replaceWith(editor);
-        const textarea = editor.querySelector('textarea');
-        textarea.focus();
-        textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+        const editTextarea = editor.querySelector('textarea');
+        editTextarea.focus();
+        editTextarea.setSelectionRange(editTextarea.value.length, editTextarea.value.length);
 
         editor.querySelector('.annotate-btn-save').addEventListener('click', function () {
-          const updated = textarea.value.trim();
+          const updated = editTextarea.value.trim();
           if (!updated) return;
           const newNote = document.createElement('p');
           newNote.className = 'annotate-note-text';
@@ -544,8 +745,7 @@
       });
 
       // Delete
-      cardBody.querySelector('.annotate-dropdown-item.danger').addEventListener('click', function () {
-        // Remove highlight from document, preserving the text
+      cardBody.querySelector('.annotate-delete-btn').addEventListener('click', function () {
         if (card._annotationMark) {
           const mark = card._annotationMark;
           const parent = mark.parentNode;
@@ -560,18 +760,14 @@
         }
       });
 
+      // Replies section
       const replies = document.createElement('div');
       replies.className = 'annotate-replies';
-
-      const replyAction = document.createElement('div');
-      replyAction.className = 'annotate-reply-action';
-      replyAction.innerHTML = `<button class="annotate-reply-link">Reply</button>`;
-      replies.appendChild(replyAction);
-
       card.appendChild(replies);
 
-      replyAction.querySelector('.annotate-reply-link').addEventListener('click', function () {
-        openReplyComposer(replies, replyAction);
+      // Wire up reply trigger from action row
+      cardBody.querySelector('.annotate-reply-trigger').addEventListener('click', function () {
+        openReplyComposer(replies);
       });
     });
 
@@ -583,7 +779,7 @@
     });
   }
 
-  function openReplyComposer(replies, replyAction) {
+  function openReplyComposer(replies) {
     // Don't open a second composer
     if (replies.querySelector('.annotate-reply-composer')) return;
 
@@ -597,7 +793,7 @@
       </div>
     `;
 
-    replies.insertBefore(composerWrap, replyAction);
+    replies.appendChild(composerWrap);
 
     const textarea = composerWrap.querySelector('.annotate-reply-composer');
     setTimeout(() => textarea.focus(), 50);
@@ -606,23 +802,85 @@
       const text = textarea.value.trim();
       if (!text) return;
 
-      const now = new Date();
-      const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
       const replyEl = document.createElement('div');
       replyEl.className = 'annotate-reply';
       replyEl.innerHTML = `
         <div class="annotate-meta">
-          <div class="annotate-avatar">A</div>
-          <div class="annotate-meta-text">
-            <span class="annotate-author">Anonymous</span>
-            <span class="annotate-timestamp">${timeStr} · Today</span>
+          <div class="annotate-avatar annotate-avatar-sm">A</div>
+          <div class="annotate-meta-right">
+            <div class="annotate-author-row">
+              <span class="annotate-author">Anonymous</span>
+              <div class="annotate-author-row-right">
+                <span class="annotate-timestamp">JUST NOW</span>
+                <button class="annotate-icon-btn annotate-menu-btn" title="More">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+                </button>
+                <div class="annotate-dropdown hidden">
+                  <button class="annotate-dropdown-item annotate-edit-btn">Edit</button>
+                  <button class="annotate-dropdown-item danger annotate-delete-btn">Delete</button>
+                </div>
+              </div>
+            </div>
+            <p class="annotate-note-text" style="margin-bottom:0;">${text}</p>
           </div>
         </div>
-        <p class="annotate-note-text">${text}</p>
       `;
-      replies.insertBefore(replyEl, composerWrap);
 
+      // Three-dot menu toggle
+      const replyMenuBtn = replyEl.querySelector('.annotate-menu-btn');
+      const replyDropdown = replyEl.querySelector('.annotate-dropdown');
+      replyMenuBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        replyDropdown.classList.toggle('hidden');
+      });
+      document.addEventListener('click', function () {
+        replyDropdown.classList.add('hidden');
+      });
+
+      // Edit reply
+      replyEl.querySelector('.annotate-edit-btn').addEventListener('click', function () {
+        replyDropdown.classList.add('hidden');
+        const noteEl = replyEl.querySelector('.annotate-note-text');
+        const currentText = noteEl.textContent;
+
+        const editor = document.createElement('div');
+        editor.innerHTML = `
+          <textarea class="annotate-reply-composer" style="margin-top:6px;">${currentText}</textarea>
+          <div class="annotate-card-actions">
+            <button class="annotate-btn-cancel">Cancel</button>
+            <button class="annotate-btn-save">Save</button>
+          </div>
+        `;
+        noteEl.replaceWith(editor);
+        const editTextarea = editor.querySelector('textarea');
+        editTextarea.focus();
+        editTextarea.setSelectionRange(editTextarea.value.length, editTextarea.value.length);
+
+        editor.querySelector('.annotate-btn-save').addEventListener('click', function () {
+          const updated = editTextarea.value.trim();
+          if (!updated) return;
+          const newNote = document.createElement('p');
+          newNote.className = 'annotate-note-text';
+          newNote.style.marginBottom = '0';
+          newNote.textContent = updated;
+          editor.replaceWith(newNote);
+        });
+
+        editor.querySelector('.annotate-btn-cancel').addEventListener('click', function () {
+          const restored = document.createElement('p');
+          restored.className = 'annotate-note-text';
+          restored.style.marginBottom = '0';
+          restored.textContent = currentText;
+          editor.replaceWith(restored);
+        });
+      });
+
+      // Delete reply
+      replyEl.querySelector('.annotate-delete-btn').addEventListener('click', function () {
+        replyEl.remove();
+      });
+
+      replies.insertBefore(replyEl, composerWrap);
       composerWrap.remove();
     });
 
