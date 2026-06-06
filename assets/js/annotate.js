@@ -310,7 +310,11 @@
       if (!_db) return;
       if (msg.type === 'THREAD_UPDATE') {
         dbGetThread(_db, msg.thread.id).then(function (existing) {
-          if (!existing || msg.thread.updatedAt > existing.updatedAt) {
+          // Use >= not > — IDB is shared across same-origin tabs, so the tab
+          // that created the thread has already written it to IDB before posting
+          // the BC message. The incoming updatedAt will equal (not exceed) the
+          // existing one for new threads; >= correctly triggers a re-render.
+          if (!existing || msg.thread.updatedAt >= existing.updatedAt) {
             dbSaveThread(_db, msg.thread).then(function () {
               _rerenderAfterPull([msg.thread]);
             });
