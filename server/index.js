@@ -15,8 +15,8 @@ if (major < 23 && (major < 22 || minor < 5)) {
 }
 
 const express = require('express');
-const cors    = require('cors');
-const path    = require('path');
+const cors = require('cors');
+const path = require('path');
 
 const app = express();
 
@@ -26,11 +26,13 @@ app.use(express.json());
 // Serve demo/ and assets/ from the project root
 app.use(express.static(path.join(__dirname, '..')));
 
-app.use('/threads',  require('./routes/threads'));
+app.use('/threads', require('./routes/threads'));
 app.use('/activity', require('./routes/activity'));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, function () {
   console.log('Annotate server running on http://localhost:' + PORT);
-  console.log('Demo: http://localhost:' + PORT + '/demo/demo.html');
+  console.log('Demo (Offline + BroadcastChannel): http://localhost:' + PORT + '/demo/demo.html');
+  console.log('Demo (P2P): http://localhost:' + PORT + '/demo/demo-p2p.html');
+  console.log('Demo ( Server sync ): http://localhost:' + PORT + '/demo/demo-sync-with-server.html');
 });

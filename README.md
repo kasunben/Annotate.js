@@ -22,6 +22,7 @@ Lightweight inline annotation and threaded comments for any web page — added v
 - **P2P sync** — optional `data-room-id` activates WebRTC peer-to-peer sync; no server needed; annotation content is DTLS-encrypted end-to-end
 - **Multi-user sync** — optional Node.js + SQLite backend syncs annotations across browsers (30 s poll + tab-focus refresh)
 - **Display name changes propagate retroactively** — renaming yourself in Settings backfills the new name onto all your existing threads and replies and syncs the change to other users immediately
+- **Export / Import** — download all threads, activity, and settings for the current page as a JSON file; import merges back (last-write-wins); restores previously deleted threads; propagates to all peers via the active sync mode
 - **About panel in Settings** — surfaces the build version, active sync mode, and a mode-aware privacy note
 - **Zero runtime dependencies** — one JS file; Trystero bundled at build time
 
@@ -280,8 +281,8 @@ Annotate.js/
 |-----|---------|
 | **Threads** | Active annotations for the current page |
 | **Resolved** | Resolved annotations. Fully frozen — Edit, Delete, and Reply are hidden for everyone (including the owner). Anyone can click **Un-Resolve** to send the thread back to active, where Edit and Delete become available to the owner again. |
-| **Activity** | Shared event feed — all users' creates, replies, edits, resolves, deletes |
-| **Settings** | Display name (changes backfill all your existing threads and replies and sync to peers) · "Clear all annotations" (offline/BC mode only) · About (app name, version, active sync mode, mode-aware privacy note, GitHub link) |
+| **Activity** | Shared event feed — all users' creates, replies, edits, resolves, deletes, exports, and imports (blue dot for export/import events) |
+| **Settings** | Display name (changes backfill all your existing threads and replies and sync to peers) · **Export / Import** (download JSON backup; import merges by last-write-wins; available in all sync modes) · "Clear all annotations" (offline/BC mode only) · About (app name, version, active sync mode, mode-aware privacy note, GitHub link) |
 
 ---
 
@@ -328,6 +329,10 @@ No automated test suite. Three demo pages available after `npm start`:
 - [ ] Settings → About shows correct name, version, sync mode chip, and privacy note for the current mode
 - [ ] Settings → change display name → all existing cards and replies by that author update to the new name immediately (no reload); in server-sync / P2P modes other users see the updated name within 30 s / on next P2P broadcast
 - [ ] Settings → "Clear all annotations" (offline only) → sidebar empties, stays empty after reload; button absent in server-sync and P2P modes
+- [ ] Settings → Export / Import → **Download annotations** → JSON file downloads; open and verify threads, activity, and settings blocks are present
+- [ ] Clear all annotations, then **Import from file…** the downloaded JSON → threads reappear without reload; Activity tab shows a blue-dot `data_imported` entry
+- [ ] Import the same file again → alert "Import complete — all threads are already up to date."
+- [ ] Delete a thread, then import a backup made before the deletion → thread is restored; Activity tab shows `data_imported (1 restored)`
 
 **Access control checklist** (server-sync or P2P, two browser profiles):
 - [ ] User A creates a thread → User B sees the thread but no Edit / Delete menu on it
@@ -472,3 +477,4 @@ Point `src` at your deployed server and you're done:
 - [x] About panel in Settings — app name, version (injected at build time from `package.json`), sync mode chip, mode-aware privacy note, GitHub link
 - [x] Tooltip on the floating comment button
 - [x] Display name rename propagation — `_renameAuthorEverywhere` backfills new name onto all owned threads/replies in IDB, syncs via active mode
+- [x] Export / Import — JSON backup/restore for threads, activity, and settings; merge-on-import (last-write-wins); restored threads get a fresh `updatedAt` so they propagate correctly via BC, P2P, and server incremental pulls; `data_exported` / `data_imported` activity entries with blue dot
