@@ -1,8 +1,3 @@
-// esbuild bundles trystero/nostr at build time — no runtime network fetch needed.
-// In offline-only or server-sync mode (_roomId is null) this import is dead code
-// that tree-shaking / minification will remove automatically.
-import { joinRoom as _trysteroJoin } from 'trystero/nostr';
-
 (function () {
   'use strict';
 
@@ -1808,6 +1803,12 @@ import { joinRoom as _trysteroJoin } from 'trystero/nostr';
    * Used automatically when the relay is unreachable.
    */
   function _initNostrP2P() {
+    // _trysteroJoin is only available in the bundled build (annotate.min.js).
+    // When the raw source is loaded directly it is undefined — fail gracefully.
+    if (typeof _trysteroJoin !== 'function') {
+      console.warn('Annotate.js P2P: NOSTR fallback requires the bundled build (annotate.min.js). Raw annotate.js does not include Trystero.');
+      return;
+    }
     var room;
     try {
       room = _trysteroJoin({ appId: _siteId }, _roomId);

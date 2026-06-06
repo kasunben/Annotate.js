@@ -8,7 +8,7 @@
   },
   "scripts": {
     "start": "node server/index.js",
-    "build": "esbuild assets/js/annotate.js --bundle --minify --format=iife --outfile=annotate.min.js",
+    "build": "esbuild assets/js/annotate.js --bundle --minify --format=iife --inject:assets/js/trystero-shim.js --outfile=annotate.min.js",
     "kill-port": "bash -c 'pid=$(lsof -nP -iTCP:3000 -sTCP:LISTEN 2>/dev/null | grep LISTEN | awk \"{print \\$2}\" | head -1); if [ -n \"$pid\" ]; then kill -9 $pid && echo \"Port 3000 freed (PID $pid)\"; else echo \"Port 3000 is already free\"; fi'",
     "pm2:start": "pm2 start ecosystem.config.js",
     "pm2:stop": "pm2 stop annotate",
