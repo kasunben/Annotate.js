@@ -81,6 +81,44 @@ Injects a collapsible right sidebar + floating comment button. All CSS embedded 
 Trystero (NOSTR P2P signaling) into the output at build time; no runtime CDN fetch needed.
 The Dockerfile builds it automatically in stage 1.
 
+## Sync Modes
+
+Four modes, always layered in this order. Modes 1+2 are always active; 3 and 4 are opt-in and mutually exclusive.
+
+| # | Mode | Activated by | Scope | Dependencies |
+|---|---|---|---|---|
+| 1 | **Offline** | *(default)* | Single tab, IDB-persisted | None |
+| 2 | **BroadcastChannel** | *(automatic with Mode 1)* | Same browser, all tabs on same origin, instant | Browser BroadcastChannel API |
+| 3 | **Server sync** | `data-sync-url` | Any browser/device, SQLite-durable | Node.js server |
+| 4 | **P2P** | `data-room-id` | Any browser, DTLS-encrypted WebRTC | Room UUID (shared secret); relay for signaling only |
+
+### Mode 2 — BroadcastChannel
+Zero configuration. `_bc = new BroadcastChannel('annotate-' + _siteId)` created at IIFE init. Every `syncThread` / `syncActivity` call posts `THREAD_UPDATE` / `ACTIVITY_UPDATE` before the `if (!_syncUrl)` guard so broadcasts fire in all modes. Cross-browser (e.g. Firefox → Brave) requires Mode 4 — BroadcastChannel is same-browser-process only by spec.
+
+### Mode 3 — Server sync
+Push on every mutation (`POST /threads`, `POST /activity`). Pull on page load + 30 s interval + `visibilitychange`. `dirty` flag queues offline writes for `flushDirtyThreads()` on reconnect. Last-write-wins by `updatedAt`; `?since=` timestamps drive incremental pulls.
+
+### Mode 4 — P2P (three-tier signaling)
+`initP2P()` called in boot sequence when `_roomId` is set. Tries Tier 1 first; 5 s fallback timer fires `_initNostrP2P()` if relay doesn't connect.
+
+| Tier | Function | Method | Fallback trigger |
+|---|---|---|---|
+| 1 | `_initRelayP2P(relayUrl, …)` | Hosted Cloudflare Worker WebSocket (`wss://relay.annotate-js.workers.dev`) | `ws.onerror` or 5 s timeout |
+| 2 | `_initRelayP2P(relayUrl, …)` *(same function, different URL)* | Self-hosted relay via `data-relay-url` | Same as Tier 1 |
+| 3 | `_initNostrP2P()` | NOSTR public relays via Trystero | None — terminal fallback |
+
+Once a WebRTC data channel opens, `_p2pBroadcastThread` / `_p2pBroadcastActivity` no-op stubs are replaced with real senders that iterate all open peer connections. Annotation data never passes through the relay — only SDP offers/answers and ICE candidates do.
+
+### Expected P2P console output (before relay is deployed)
+```
+WebSocket connection to 'wss://relay.annotate-js.workers.dev/…' failed  ← expected
+Annotate.js P2P: relay disconnected — falling back to NOSTR              ← expected
+Trystero: relay failure from wss://relay.damus.io/ — rate-limited …     ← expected during heavy testing
+```
+All harmless. P2P works via Tier 3. Disappears once the Cloudflare relay is deployed.
+
+---
+
 ## Running the Server
 
 **Prerequisite:** Node.js ≥ 23 (`.nvmrc` pins this). The server uses the built-in `node:sqlite` module.
@@ -434,9 +472,10 @@ Test checklist for any change:
 - **`roomId`** — read via `document.currentScript.dataset.roomId`; `null` = P2P disabled; activates `initP2P()` in boot sequence
 - **`relayUrl`** — read via `document.currentScript.dataset.relayUrl`; defaults to `'wss://relay.annotate-js.workers.dev'`; overridden by `data-relay-url` for self-hosted relay
 - **BroadcastChannel** — `_bc` created for same-origin multi-tab sync; posts `THREAD_UPDATE` / `ACTIVITY_UPDATE` messages; handler in `_bc.onmessage` applies last-write-wins before re-rendering; gracefully absent (`null`) in environments without BroadcastChannel support
+- **BroadcastChannel `>=` not `>` for updatedAt** — IDB is shared across all same-origin tabs in the same browser; when Tab 1 calls `dbSaveThread` and then (inside `.then()`) posts the BC message, the write has already committed to shared IDB by the time Tab 2's handler calls `dbGetThread`; so `existing.updatedAt === msg.thread.updatedAt` for brand-new threads, and a strict `>` comparison would skip the re-render entirely; the condition must use `>=` so equal timestamps still trigger `_rerenderAfterPull`
 - **P2P tiered signaling** — `initP2P()` tries the relay first with a 5 s fallback timer; `_initRelayP2P(url, onConnected, onFailure)` calls `onConnected()` on `ws.onopen` (clears timer); `onFailure()` fires on `ws.onerror`; both paths lead to `_initNostrP2P()` as fallback
 - **`_p2pBroadcastThread` / `_p2pBroadcastActivity`** — no-op function stubs replaced by real senders once a P2P connection is established; called at the top of `syncThread` / `syncActivity` so broadcasts fire in offline-only mode too
-- **Trystero bundled at build time** — `import { joinRoom as _trysteroJoin } from 'trystero/nostr'` placed before the IIFE; esbuild bundles Trystero into the output; accessible inside the IIFE via closure over the outer esbuild IIFE scope; final bundle ~64 KB minified
+- **Trystero bundled at build time** — raw `annotate.js` has **no `import` statement** (it must remain loadable as a plain classic `<script>`); instead, `assets/js/trystero-shim.js` exports `{ joinRoom as _trysteroJoin } from 'trystero/nostr'` and the build command uses `--inject:assets/js/trystero-shim.js`; esbuild replaces every free-variable `_trysteroJoin` reference with the bundled function at build time; when the raw source is loaded directly, `_trysteroJoin` is `undefined` and the null guard in `_initNostrP2P` (`if (typeof _trysteroJoin !== 'function') return;`) short-circuits cleanly; final bundle ~64 KB minified
 - **Card positioning** — `_anchorTop` on each DOM element; `repositionCards()` re-evaluates on every height change via `ResizeObserver`
 - **Soft-delete** — `deletedAt` on Threads, `deleted` on Replies; never hard-delete so deletes propagate to other clients via GET
 - **`dirty` flag** — client-only; never stored in SQLite; cleared after a successful `syncThread` push

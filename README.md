@@ -19,6 +19,43 @@ Lightweight inline annotation and threaded comments for any web page — added v
 
 ---
 
+## Sync modes
+
+Annotate.js has four sync modes. Modes 1 and 2 are always active with zero configuration. Modes 3 and 4 are opt-in and mutually exclusive with each other.
+
+| Mode | Activated by | Sync scope | Server needed? |
+|---|---|---|---|
+| **1 — Offline** | Default (no attributes needed) | Single browser, persists in IndexedDB | No |
+| **2 — BroadcastChannel** | Automatic alongside Mode 1 | Same browser, multiple tabs, instant | No |
+| **3 — Server sync** | `data-sync-url="https://…"` | Any browser, any device, durable | Yes (Node.js + SQLite) |
+| **4 — P2P** | `data-room-id="<uuid>"` | Any browser, encrypted peer-to-peer | No (signaling relay only) |
+
+### Mode 1 — Offline (default)
+Annotations are saved to IndexedDB and survive page reloads. No network required. Works with the raw `annotate.js` source file — no build step needed.
+
+### Mode 2 — BroadcastChannel (automatic)
+Layered on top of Mode 1 at zero cost. Any tabs open on the **same origin in the same browser** stay in sync instantly — no server, no WebRTC, no configuration. Uses the built-in [BroadcastChannel API](https://developer.mozilla.org/en-US/docs/Web/API/BroadcastChannel).
+
+> Cross-browser (e.g. Firefox → Brave) is not possible via BroadcastChannel — that requires Mode 4.
+
+### Mode 3 — Server sync
+Activated by `data-sync-url`. Every mutation is pushed to a shared SQLite backend immediately and pulled back on page load, every 30 seconds, and on tab focus. Supports any number of concurrent users across any browser or device. Offline writes are queued (`dirty=true`) and flushed automatically on reconnect.
+
+### Mode 4 — P2P (WebRTC)
+Activated by `data-room-id`. Annotation content flows **directly browser-to-browser** over DTLS-encrypted WebRTC data channels — no server ever sees it. Uses a three-tier signaling fallback for the WebRTC handshake:
+
+| Tier | Signaling method | Used when |
+|---|---|---|
+| **1** | Hosted Cloudflare relay (`wss://relay.annotate-js.workers.dev`) | Default — sub-second peer discovery |
+| **2** | Self-hosted relay (`data-relay-url="wss://…"`) | Enterprise / air-gapped deployments |
+| **3** | NOSTR public relays via [Trystero](https://github.com/dmotz/trystero) | Automatic fallback if Tiers 1 & 2 fail |
+
+The fallback is automatic — if the relay WebSocket fails to connect within 5 seconds the client silently switches to NOSTR. Annotation data never passes through any relay regardless of tier.
+
+> **Heads up:** the hosted relay (`wss://relay.annotate-js.workers.dev`) is not yet deployed. Until it is, Tier 3 (NOSTR) is the active path. A failed WebSocket connection to the relay URL and occasional NOSTR rate-limit warnings in the console are both expected and harmless — see [Troubleshooting](#troubleshooting).
+
+---
+
 ## Quick start (offline, no server)
 
 ```html
@@ -97,9 +134,10 @@ Browser A                  Relay (signaling only)          Browser B
                                                               → re-render card
 ```
 
-- Annotation content **never** passes through the relay — only the WebRTC handshake (SDP + ICE)
-- Three-tier signaling: hosted relay (default) → self-hosted relay (`data-relay-url`) → NOSTR (automatic fallback)
+- Annotation content **never** passes through any relay — only the WebRTC handshake (SDP + ICE)
+- Three-tier signaling fallback: hosted relay → self-hosted relay (`data-relay-url`) → NOSTR via Trystero (automatic, ~5–15 s discovery)
 - Last-write-wins by `updatedAt` — same conflict model as server sync
+- See [Sync modes](#sync-modes) for the full tier table and when each is used
 
 ### Tradeoffs vs server sync
 
@@ -141,7 +179,8 @@ Select text → add comment
 ```
 Annotate.js/
 ├── assets/
-│   └── js/annotate.js               # Client library source — single IIFE (+ Trystero import)
+│   ├── js/annotate.js               # Client library source — single IIFE; no imports (loads as plain script)
+│   └── js/trystero-shim.js          # esbuild --inject shim; wires Trystero into the bundle at build time
 ├── annotate.min.js                  # Production build — esbuild bundles Trystero; run npm run build
 ├── demo/
 │   ├── demo.html                    # Offline-only test page
@@ -280,6 +319,26 @@ Or use the npm script:
 ```bash
 npm run kill-port
 ```
+
+### Expected console warnings in P2P mode
+
+When using `demo-p2p.html` (or any `data-room-id` embed) before the hosted relay is deployed, you will see:
+
+```
+WebSocket connection to 'wss://relay.annotate-js.workers.dev/room/…' failed
+Annotate.js P2P: relay disconnected — falling back to NOSTR
+Trystero: relay failure from wss://relay.damus.io/ — rate-limited: you are noting too much
+```
+
+All three are **expected and harmless**:
+
+| Warning | Cause | Impact |
+|---|---|---|
+| WebSocket connection failed | Hosted relay not yet deployed | None — 5 s fallback to NOSTR fires automatically |
+| Relay disconnected — falling back to NOSTR | Tier 1 failed, Tier 3 activating | None — P2P works via NOSTR |
+| Trystero rate-limited from relay.damus.io | NOSTR relay throttles rapid reconnects during testing | None — Trystero tries its other 7+ relays |
+
+P2P will still work. The warnings disappear once the hosted Cloudflare relay is deployed (see [Roadmap](#roadmap)).
 
 ---
 
