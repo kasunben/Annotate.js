@@ -3,7 +3,7 @@ FROM node:23-alpine AS builder
 WORKDIR /app
 COPY package*.json ./
 RUN npm install
-COPY assets/js/annotate.js assets/js/
+COPY assets/js/ assets/js/
 RUN npm run build
 
 # Stage 2: production runtime
