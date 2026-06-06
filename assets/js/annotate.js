@@ -2801,6 +2801,7 @@
     const range = lastSelectedRange;
     hideCommentBtn();
     openSidebar();
+    _switchTab('Threads');   // always bring the Threads panel into view for the composer
     addAnnotationCard(text, range);
   });
 
