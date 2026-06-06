@@ -2134,6 +2134,13 @@
       if (st.updatedAt !== existingCard._lastRenderedAt &&
           !existingCard.querySelector('.annotate-card-composer') &&
           !existingCard.querySelector('.annotate-reply-composer')) {
+        // Reaching this branch means st.resolved is false. If the card was
+        // previously dimmed by a resolve event from another peer, undim it
+        // and unmark the highlight; idempotent when the card was never dimmed.
+        existingCard.style.opacity      = '';
+        existingCard.style.pointerEvents = '';
+        _renderedThreadIds.add(st.id);
+        if (existingMark) existingMark.classList.remove('is-resolved');
         _renderSavedCard(existingCard, st);
       }
     });
