@@ -1,6 +1,11 @@
 (function () {
   'use strict';
 
+  // Injected by esbuild --define at build time from package.json. Falls back
+  // to "dev" when the raw source is loaded directly without the build step,
+  // making unbundled embeds visually distinguishable from releases.
+  var _VERSION = (typeof __ANNOTATE_VERSION__ !== 'undefined') ? __ANNOTATE_VERSION__ : 'dev';
+
   // ── IndexedDB layer ───────────────────────────────────────────────────────
   //
   // All persistence functions live here, inside the same IIFE, so no separate
@@ -939,6 +944,43 @@
       background: #d1fae5;
       opacity: 0.7;
     }
+
+    /* ===================== ABOUT (Settings → About) ===================== */
+    .annotate-about-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+    .annotate-about-name {
+      font-weight: 600;
+      color: #1a1a1a;
+    }
+    .annotate-about-version {
+      font-size: 12px;
+      color: #888;
+      font-variant-numeric: tabular-nums;
+    }
+    .annotate-mode-chip {
+      margin-left: auto;
+      font-size: 11px;
+      font-weight: 500;
+      padding: 2px 8px;
+      border-radius: 10px;
+      background: #f0f0f0;
+      color: #555;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .annotate-privacy-note {
+      margin: 4px 0 8px 0;
+    }
+    .annotate-about-link {
+      font-size: 12px;
+      color: #2563eb;
+      text-decoration: none;
+    }
+    .annotate-about-link:hover { text-decoration: underline; }
   `;
   document.head.appendChild(style);
 
@@ -1183,6 +1225,21 @@
     document.addEventListener('click', function () {
       dropdown.classList.add('hidden');
     });
+  }
+
+  /** Human-readable label for the currently-active sync mode. */
+  function _syncMode() {
+    if (_roomId)  return 'P2P';
+    if (_syncUrl) return 'Server sync';
+    if (_bc)      return 'Offline + BroadcastChannel';
+    return 'Offline';
+  }
+
+  /** Short privacy note describing where annotation data lives in the current mode. */
+  function _privacyNote() {
+    if (_roomId)  return 'End-to-end encrypted between peers. No server sees the content.';
+    if (_syncUrl) return 'Synced to your own server. No third party involved.';
+    return 'Stored locally in your browser. Never leaves this device.';
   }
 
   /**
@@ -1562,6 +1619,18 @@
         <button class="annotate-settings-btn-danger" id="annotate-clear-btn">Clear all annotations</button>
         <p class="annotate-settings-hint">Permanently removes all threads and activity for this site.</p>
       </div>` : '';
+    var aboutHtml = `
+      <div class="annotate-settings-group annotate-about">
+        <label class="annotate-settings-label">About</label>
+        <div class="annotate-about-row">
+          <span class="annotate-about-name">Annotate.js</span>
+          <span class="annotate-about-version">v${_VERSION}</span>
+          <span class="annotate-mode-chip" title="Active sync mode">${_syncMode()}</span>
+        </div>
+        <p class="annotate-settings-hint annotate-privacy-note">${_privacyNote()}</p>
+        <a class="annotate-about-link" href="https://github.com/kasunben/Annotate.js"
+           target="_blank" rel="noopener">View on GitHub</a>
+      </div>`;
     _panelSettings.innerHTML = `
       <div class="annotate-settings-group">
         <label class="annotate-settings-label">Display name</label>
@@ -1570,6 +1639,7 @@
         <p class="annotate-settings-hint">Shown on all your annotations and replies.</p>
       </div>
       ${clearGroupHtml}
+      ${aboutHtml}
     `;
 
     const nameInput = _panelSettings.querySelector('#annotate-name-input');
@@ -1582,7 +1652,7 @@
       if (e.key === 'Enter') { _saveName(); nameInput.blur(); }
     });
 
-    if (!showClearBtn) return; // no clear button in P2P mode
+    if (!showClearBtn) return; // no clear button in server-sync or P2P modes
 
     _panelSettings.querySelector('#annotate-clear-btn').addEventListener('click', function () {
       if (!window.confirm('Delete all annotations and activity for this site? This cannot be undone.')) return;
@@ -2258,6 +2328,7 @@
   // --- Floating annotation button ---
   const commentBtn = document.createElement('button');
   commentBtn.id = 'annotate-comment-btn';
+  commentBtn.title = 'Add a comment';
   commentBtn.classList.add('hidden');
   commentBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"/><path d="M7 11h10"/><path d="M7 15h6"/><path d="M7 7h8"/></svg>';
   document.documentElement.appendChild(commentBtn);

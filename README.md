@@ -273,7 +273,7 @@ Annotate.js/
 | **Threads** | Active annotations for the current page |
 | **Resolved** | Resolved annotations (read-only) |
 | **Activity** | Shared event feed — all users' creates, replies, edits, resolves, deletes |
-| **Settings** | Display name · "Clear all annotations" (offline/BC mode only); hidden in server-sync and P2P modes |
+| **Settings** | Display name · "Clear all annotations" (offline/BC mode only) · About (app name, version, active sync mode, mode-aware privacy note, GitHub link) |
 
 ---
 
