@@ -48,7 +48,11 @@ router.get('/', function (req, res) {
 
 // POST /threads  — upsert (full thread, INSERT OR REPLACE)
 router.post('/', function (req, res) {
-  const row      = threadToRow(req.body);
+  const b = req.body;
+  if (!b || !b.id || !b.siteId || !b.pageUrl) {
+    return res.status(400).json({ error: 'id, siteId, and pageUrl are required' });
+  }
+  const row      = threadToRow(b);
   const existing = getById.get(row.id);
   if (!checkOwnership(res, existing, row.author_id)) return;
   db.prepare(`
