@@ -10,11 +10,13 @@ Lightweight inline annotation and threaded comments for any web page — added v
 
 - **Select any text** → floating button → add a comment
 - **Threaded replies** on every annotation
-- **Resolve** threads when addressed
+- **Resolve / Un-Resolve** — resolved threads are frozen (no Edit / Delete / Reply); anyone can revert one back to active
+- **Ownership-based access control** — in multi-user modes, each browser only edits or deletes its own threads and replies; Resolve is collaborative; offline mode is unrestricted
 - **Offline-first** — works with no server; annotations persist in IndexedDB
 - **Multi-tab sync** — BroadcastChannel keeps tabs on the same origin in sync instantly, zero deps
 - **P2P sync** — optional `data-room-id` activates WebRTC peer-to-peer sync; no server needed; annotation content is DTLS-encrypted end-to-end
 - **Multi-user sync** — optional Node.js + SQLite backend syncs annotations across browsers (30 s poll + tab-focus refresh)
+- **About panel in Settings** — surfaces the build version, active sync mode, and a mode-aware privacy note
 - **Zero runtime dependencies** — one JS file; Trystero bundled at build time
 
 ---
@@ -66,7 +68,7 @@ The fallback is automatic — if the relay WebSocket fails to connect within 5 s
         data-site-id="my-site"></script>
 
 <!-- Pin to a specific version (recommended for production) -->
-<script src="https://cdn.jsdelivr.net/gh/kasunben/Annotate.js@v0.2.2/annotate.min.js"
+<script src="https://cdn.jsdelivr.net/gh/kasunben/Annotate.js@v0.3.2/annotate.min.js"
         data-site-id="my-site"></script>
 ```
 
@@ -284,13 +286,17 @@ Thread {
   id, siteId, pageUrl,
   quote,          // snapshot of selected text
   anchor,         // { xpath, startOffset, endOffset } — survives page reload
-  body, author, createdAt, updatedAt,
+  body, author,
+  authorId,       // UUID from localStorage 'annotate_author_id'; null for legacy threads
+  createdAt, updatedAt,
   resolved, resolvedAt, resolvedBy,
-  replies: [{ id, body, author, createdAt, updatedAt, deleted }],
+  replies: [{ id, body, author, authorId, createdAt, updatedAt, deleted }],
   dirty,          // true = not yet synced (client-only, never sent to server)
   deletedAt,      // soft-delete
 }
 ```
+
+`authorId` is the ownership proof used by `_isOwner(item)` for the UI gating and by the server's `checkOwnership` helper on `POST /threads`. Threads with `authorId: null` (created before access control existed) are permanently read-only in multi-user modes; the operator can reclaim ownership via direct SQL.
 
 ---
 
@@ -305,25 +311,34 @@ No automated test suite. Three demo pages available after `npm start`:
 | P2P | `http://localhost:3000/demo/demo-p2p.html` | P2P sync — open in two browsers or incognito windows |
 
 **Core checklist** (use either demo page):
-- [ ] Select text → comment button appears
+- [ ] Select text → comment button appears (tooltip "Add a comment" on hover)
 - [ ] Add thread → highlight + card appear in sidebar
 - [ ] Reload → threads and highlights restored
 - [ ] Edit / delete / resolve persist across reload
 - [ ] Replies persist across reload
-- [ ] Resolved tab shows resolved threads
-- [ ] Activity tab shows all events
+- [ ] Resolved tab shows resolved threads; Edit / Delete / Reply hidden on resolved cards
+- [ ] **Un-Resolve** from Resolved tab → card disappears from Resolved and reappears in Threads (active state, owner gets Edit/Delete back) without reload
+- [ ] Activity tab shows all events including `thread_resolved` / `thread_unresolved`
+- [ ] Settings → About shows correct name, version, sync mode chip, and privacy note for the current mode
 - [ ] Settings → "Clear all annotations" (offline only) → sidebar empties, stays empty after reload; button absent in server-sync and P2P modes
+
+**Access control checklist** (server-sync or P2P, two browser profiles):
+- [ ] User A creates a thread → User B sees the thread but no Edit / Delete menu on it
+- [ ] User B can still hit **Resolve** on User A's thread (collaborative action)
+- [ ] User A and User B can each Edit / Delete their **own** threads / replies
+- [ ] Server endpoint: `curl -X POST /threads` with empty body → 400 JSON `{"error":"id, siteId, and pageUrl are required"}`
+- [ ] Server endpoint: `curl -X POST /threads` with an existing thread id + wrong `authorId` → 403 `{"error":"forbidden"}`
 
 **Sync checklist** (use `demo-sync-with-server.html` in two windows):
 - [ ] User A annotates → User B sees it within 30 s (or on tab focus)
-- [ ] User A resolves → User B's card dims within 30 s
+- [ ] User A resolves → User B's card dims and the highlight gains `is-resolved` within 30 s
+- [ ] User A **un-resolves** → User B's card undims and the highlight loses `is-resolved` without reload
 - [ ] User A deletes → User B's highlight unwraps within 30 s
 - [ ] Kill server → User A can still annotate (offline mode, `dirty=true`)
 - [ ] Restart server → User A's offline annotations push automatically
 - [ ] User A annotates → User B's Activity tab shows `thread_created` within 30 s
 - [ ] User A resolves → User B's Activity tab shows `thread_resolved` within 30 s
-- [ ] Settings → "Clear my annotations" on User A → only User A's threads gone; User B's threads remain
-- [ ] User A's activity tab empties on next pull for User B
+- [ ] User A un-resolves → User B's Activity tab shows `thread_unresolved` within 30 s
 
 ---
 
@@ -441,6 +456,11 @@ Point `src` at your deployed server and you're done:
 
 - [ ] Deploy hosted relay to `wss://relay.annotate-js.workers.dev` (relay code in `relay/` is ready)
 - [ ] User account registration + annotation profile management (Milestone 2)
+- [ ] Server enforcement parity for collaborative actions — `checkOwnership` currently blocks non-owner Resolve / Un-Resolve in server-sync mode
+- [ ] Live re-render of the Resolved tab on inbound peer updates (currently re-renders only on tab switch)
 
 **Shipped:**
 - [x] Ownership-based access control — Edit/Delete gated per browser; Resolve open to all; offline mode unrestricted
+- [x] Frozen Resolved tab — Edit / Delete / Reply hidden on resolved threads; **Un-Resolve** toggle open to anyone, reseeds the Threads tab locally and across peers without reload
+- [x] About panel in Settings — app name, version (injected at build time from `package.json`), sync mode chip, mode-aware privacy note, GitHub link
+- [x] Tooltip on the floating comment button
