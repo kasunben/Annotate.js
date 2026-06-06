@@ -961,6 +961,9 @@
       color: #888;
       font-variant-numeric: tabular-nums;
     }
+    .annotate-mode-chip-row {
+      margin-bottom: 6px;
+    }
     .annotate-mode-chip {
       font-size: 11px;
       font-weight: 500;
@@ -1234,11 +1237,14 @@
     return 'Offline';
   }
 
-  /** Short privacy note describing where annotation data lives in the current mode. */
+  /**
+   * Short privacy note describing where annotation data lives in the current mode.
+   * Returns an array of sentences so the About panel can render each on its own line.
+   */
   function _privacyNote() {
-    if (_roomId)  return 'End-to-end encrypted between peers. No server sees the content.';
-    if (_syncUrl) return 'Synced to your own server. No third party involved.';
-    return 'Stored locally in your browser. Never leaves this device.';
+    if (_roomId)  return ['End-to-end encrypted between peers.', 'No server sees the content.'];
+    if (_syncUrl) return ['Synced to your own server.', 'No third party involved.'];
+    return ['Stored locally in your browser.', 'Never leaves this device.'];
   }
 
   /**
@@ -1624,9 +1630,11 @@
         <div class="annotate-about-row">
           <span class="annotate-about-name">Annotate.js</span>
           <span class="annotate-about-version">v${_VERSION}</span>
+        </div>
+        <div class="annotate-mode-chip-row">
           <span class="annotate-mode-chip" title="Active sync mode">${_syncMode()}</span>
         </div>
-        <p class="annotate-settings-hint annotate-privacy-note">${_privacyNote()}</p>
+        <p class="annotate-settings-hint annotate-privacy-note">${_privacyNote().join('<br>')}</p>
         <a class="annotate-about-link" href="https://github.com/kasunben/Annotate.js"
            target="_blank" rel="noopener">View on GitHub</a>
       </div>`;
