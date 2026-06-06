@@ -48,18 +48,26 @@ The client distributes as a **single JS file**. The server is optional — omit 
 <!-- Development / local (raw source, no Trystero bundle) -->
 <script src="annotate.js" data-site-id="your-site-id"></script>
 
-<!-- Production — server sync -->
+<!-- CDN — offline / P2P (no server needed; annotate.min.js committed to repo, served by jsDelivr) -->
+<script src="https://cdn.jsdelivr.net/gh/kasunben/Annotate.js@latest/annotate.min.js"
+        data-site-id="your-site-id"></script>
+
+<!-- CDN — pinned version (recommended for production) -->
+<script src="https://cdn.jsdelivr.net/gh/kasunben/Annotate.js@v0.2.2/annotate.min.js"
+        data-site-id="your-site-id"></script>
+
+<!-- Production — server sync (self-hosted) -->
 <script src="https://your-server.example.com/annotate.min.js"
         data-site-id="your-site-id"
         data-sync-url="https://your-server.example.com"></script>
 
 <!-- Production — P2P mode (no server needed; use a UUID as room-id) -->
-<script src="https://your-server.example.com/annotate.min.js"
+<script src="https://cdn.jsdelivr.net/gh/kasunben/Annotate.js@latest/annotate.min.js"
         data-site-id="your-site-id"
         data-room-id="f3a9c271-8d4e-4b1a-9c3f-d17b2e5a08cc"></script>
 
 <!-- P2P with self-hosted relay (enterprise) -->
-<script src="https://your-server.example.com/annotate.min.js"
+<script src="https://cdn.jsdelivr.net/gh/kasunben/Annotate.js@latest/annotate.min.js"
         data-site-id="your-site-id"
         data-room-id="f3a9c271-8d4e-4b1a-9c3f-d17b2e5a08cc"
         data-relay-url="wss://your-relay.example.com"></script>
@@ -77,9 +85,11 @@ The client distributes as a **single JS file**. The server is optional — omit 
 Everything (IndexedDB layer, anchor serialization, BroadcastChannel, P2P sync, server sync, UI, CSS) is inlined into the IIFE.
 Injects a collapsible right sidebar + floating comment button. All CSS embedded via `document.createElement('style')`.
 
-`annotate.min.js` is a generated artifact — run `npm run build` to produce it. esbuild bundles
+`annotate.min.js` is committed to the repo on every release (not gitignored). esbuild bundles
 Trystero (NOSTR P2P signaling) into the output at build time; no runtime CDN fetch needed.
-The Dockerfile builds it automatically in stage 1.
+This means jsDelivr can serve it directly from any git tag:
+`https://cdn.jsdelivr.net/gh/kasunben/Annotate.js@<tag>/annotate.min.js`.
+The Dockerfile also rebuilds it automatically in stage 1 from source.
 
 ## Sync Modes
 

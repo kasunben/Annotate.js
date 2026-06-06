@@ -58,11 +58,27 @@ The fallback is automatic — if the relay WebSocket fails to connect within 5 s
 
 ## Quick start (offline, no server)
 
+**Via jsDelivr CDN — no install, no server:**
+
+```html
+<!-- Always latest release -->
+<script src="https://cdn.jsdelivr.net/gh/kasunben/Annotate.js@latest/annotate.min.js"
+        data-site-id="my-site"></script>
+
+<!-- Pin to a specific version (recommended for production) -->
+<script src="https://cdn.jsdelivr.net/gh/kasunben/Annotate.js@v0.2.2/annotate.min.js"
+        data-site-id="my-site"></script>
+```
+
+`annotate.min.js` is committed to the repo on every release, so jsDelivr serves it directly from the git tag — no build step needed on your end.
+
+**Or load the raw source locally (development only — no P2P/Trystero):**
+
 ```html
 <script src="annotate.js" data-site-id="my-site"></script>
 ```
 
-That's it. Annotations are stored locally in IndexedDB and survive page reloads.
+In all cases, annotations are stored in IndexedDB and survive page reloads.
 
 ---
 
@@ -110,7 +126,7 @@ Add `data-room-id` to the script tag instead of `data-sync-url`:
 
 ```html
 <script
-  src="annotate.min.js"
+  src="https://cdn.jsdelivr.net/gh/kasunben/Annotate.js@latest/annotate.min.js"
   data-site-id="my-site"
   data-room-id="f3a9c271-8d4e-4b1a-9c3f-d17b2e5a08cc">
 </script>
@@ -181,7 +197,7 @@ Annotate.js/
 ├── assets/
 │   ├── js/annotate.js               # Client library source — single IIFE; no imports (loads as plain script)
 │   └── js/trystero-shim.js          # esbuild --inject shim; wires Trystero into the bundle at build time
-├── annotate.min.js                  # Production build — esbuild bundles Trystero; run npm run build
+├── annotate.min.js                  # Production build — committed to repo; served via jsDelivr CDN
 ├── demo/
 │   ├── demo.html                    # Offline-only test page
 │   ├── demo-sync-with-server.html   # Multi-user sync test page (data-sync-url set)
