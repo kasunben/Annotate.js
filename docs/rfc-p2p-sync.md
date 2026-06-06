@@ -8,7 +8,11 @@
 
 ## Summary
 
-Add an optional peer-to-peer sync mode to Annotate.js, activated by a new `data-room-id` script attribute. Annotation data flows directly between browsers via WebRTC (DTLS-encrypted), with no server required. Signaling (the initial peer handshake) is handled by **NOSTR relays** via the Trystero library — zero infrastructure cost, no BitTorrent involvement.
+Add an optional peer-to-peer sync mode to Annotate.js, activated by a new `data-room-id` script attribute. Annotation data flows directly between browsers via WebRTC (DTLS-encrypted) and never touches any server. Signaling (the initial peer handshake) uses a **tiered strategy**:
+
+1. **Hosted relay** (default) — a lightweight WebSocket relay operated by the project on Cloudflare Workers. Zero setup for users; GDPR-controllable; no third-party operators.
+2. **Self-hosted relay** (enterprise override) — the same relay code, self-deployed, pointed to via `data-relay-url`.
+3. **NOSTR relays** (automatic fallback) — used if the hosted relay is unreachable, for resilience.
 
 The existing offline mode and server sync path are unchanged. P2P is a third, parallel mode.
 
@@ -34,10 +38,17 @@ The goal is a mode where embedding a single `<script>` tag is sufficient for mul
         data-site-id="my-site">
 </script>
 
-<!-- P2P sync — no server needed (NEW) -->
+<!-- P2P sync — uses hosted relay by default (NEW) -->
 <script src="annotate.min.js"
         data-site-id="my-site"
-        data-room-id="my-project-annotations">
+        data-room-id="f3a9c271-8d4e-4b1a-9c3f-d17b2e5a08cc">
+</script>
+
+<!-- P2P sync — self-hosted relay (enterprise / full control) -->
+<script src="annotate.min.js"
+        data-site-id="my-site"
+        data-room-id="f3a9c271-8d4e-4b1a-9c3f-d17b2e5a08cc"
+        data-relay-url="wss://your-relay.example.com">
 </script>
 
 <!-- Server sync (current — unchanged) -->
@@ -47,22 +58,49 @@ The goal is a mode where embedding a single `<script>` tag is sufficient for mul
 </script>
 ```
 
-`data-room-id` activates P2P mode. `data-sync-url` activates server mode. Neither = offline.  
-The two sync modes are **mutually exclusive** — mixing them on a single page is not supported.
+`data-room-id` activates P2P mode. `data-relay-url` overrides the signaling relay (optional). `data-sync-url` activates server mode. Neither room nor sync URL = offline.  
+P2P and server sync modes are **mutually exclusive** — mixing them on a single page is not supported.
 
 ---
 
 ## Architecture
 
-### Signaling: Trystero (NOSTR strategy)
+### Signaling: tiered strategy
 
-[Trystero](https://github.com/dmotz/trystero) is a ~20 KB JavaScript library that establishes WebRTC connections between browsers using a pluggable signaling backend. This project uses the **NOSTR strategy** (`trystero/nostr`) exclusively.
+Signaling is the initial handshake that lets two browsers find each other before establishing a direct WebRTC connection. Annotation content never passes through any signaling layer. The project uses three tiers, tried in order:
 
-NOSTR is a decentralized relay protocol. Trystero uses it to exchange the small ICE SDP offer/answer messages needed to set up a WebRTC connection. The only information visible to NOSTR relays is the **room name** — annotation content never passes through any relay.
+#### Tier 1 — Hosted relay (default)
 
-Once connected, data flows over WebRTC data channels encrypted with DTLS (the same transport security as HTTPS).
+The project operates a minimal WebSocket relay at `wss://relay.annotatejs.io` (or similar), deployed on **Cloudflare Workers + Durable Objects**. This is the recommended default for all users.
 
-Trystero also supports BitTorrent trackers as a signaling backend. **This project does not use that strategy** — see the [Legal & Compliance](#legal--compliance) section.
+The relay protocol is 4 message types:
+
+```
+Client → Relay:  { type: 'join',   room, peerId }
+Client → Relay:  { type: 'signal', to, from, data }   ← SDP + ICE candidates only
+Client → Relay:  { type: 'leave',  room, peerId }
+Relay  → Peers:  { type: 'peer-joined' } / { type: 'peer-left' }
+```
+
+The relay stores nothing — rooms are ephemeral in-memory state in a Durable Object that evaporates when the last peer disconnects. The relay code is published in the repository so anyone can audit or self-host it.
+
+**Why Cloudflare Workers?**
+- Global edge deployment — peers connect to the nearest PoP, minimising signaling latency
+- Free tier covers millions of requests for a small project, zero ops overhead
+- Durable Objects provide consistent room state without a database
+- Cloudflare is a GDPR-compliant data processor; a Data Processing Agreement is available
+
+#### Tier 2 — Self-hosted relay (enterprise override)
+
+Setting `data-relay-url="wss://your-relay.example.com"` replaces the hosted relay entirely. The relay is the same published codebase — deployable anywhere that supports WebSockets (Cloudflare Workers, Fly.io, a $5 VPS). This gives enterprises full control over what infrastructure sees their users' IP addresses and room names.
+
+#### Tier 3 — NOSTR relays (automatic fallback)
+
+If the active relay (tier 1 or 2) is unreachable, the client automatically falls back to [Trystero](https://github.com/dmotz/trystero)'s NOSTR strategy (`trystero/nostr`). NOSTR relays are decentralised, widely distributed, and not blocked by enterprise firewalls. This provides resilience without requiring the hosted relay to have 100% uptime.
+
+Trystero's BitTorrent tracker strategy is **not used** — see the [Legal & Compliance](#legal--compliance) section.
+
+Once signaling completes (via any tier), data flows over **WebRTC data channels encrypted with DTLS** — the same transport security as HTTPS, end-to-end between browsers.
 
 ### Data flow
 
@@ -72,7 +110,7 @@ Browser A                                        Browser B
 openDB → loadThreads (IDB)                       openDB → loadThreads (IDB)
          ↓
 Trystero.joinRoom(_roomId)  ←── signaling ──►  Trystero.joinRoom(_roomId)
-                                 (NOSTR relays)
+                   (hosted relay → self-hosted relay → NOSTR fallback)
                                  only room name visible
               ↕  WebRTC data channel (DTLS encrypted)
 
@@ -126,12 +164,13 @@ Activity entries are immutable (no conflict possible). They are broadcast to all
 
 | Component | Change |
 |---|---|
-| `assets/js/annotate.js` | Add `_roomId` state var; `initP2P()`, `broadcastThread()`, `broadcastActivity()`, `onPeerData()` functions; wire into existing `dbSaveThread` + `_rerenderAfterPull` call sites |
-| Build | Trystero must be bundled into the output. Requires switching from terser-only to **esbuild** or **rollup** for the build step |
+| `assets/js/annotate.js` | Add `_roomId`, `_relayUrl` state vars; `initP2P()`, `broadcastThread()`, `broadcastActivity()`, `onPeerData()` functions; wire into existing `dbSaveThread` + `_rerenderAfterPull` call sites |
+| Build | Trystero must be bundled. Requires switching from terser-only to **esbuild** (handles bundling + minification) |
 | `annotate.min.js` | Estimated final size: ~60–80 KB minified (up from ~40 KB) |
-| `README.md` / `CLAUDE.md` | Document `data-room-id` and P2P mode |
+| `relay/` (new) | Cloudflare Worker + Durable Object implementing the relay protocol; published in the repo for self-hosters |
+| `README.md` / `CLAUDE.md` | Document `data-room-id`, `data-relay-url`, and P2P mode |
 
-Server files (`server/`) are **not touched**. The P2P mode is purely additive.
+Existing `server/` files are **not touched**. The P2P mode is purely additive.
 
 ---
 
@@ -140,12 +179,12 @@ Server files (`server/`) are **not touched**. The P2P mode is purely additive.
 | | Server sync | P2P (Trystero) |
 |---|---|---|
 | **Persistence** | SQLite — survives all browsers closing | IDB only — latecomers sync from an online peer, not a database |
-| **Privacy** | Annotations stored server-side | Annotation content never leaves the browser (DTLS E2E); room name + IPs visible to NOSTR relay operators |
-| **Hosting cost** | VPS / container required | Zero |
+| **Privacy** | Annotations stored server-side | Annotation content never leaves the browser (DTLS E2E); room name + IPs visible to relay operator (project-operated or self-hosted) |
+| **Hosting cost** | VPS / container required | Zero for annotation data; hosted relay is free-tier CF Workers |
 | **Offline writes** | `dirty` flag, flushed on next server contact | Queued in IDB; broadcast when a peer is online |
 | **Conflict resolution** | Last-write-wins (server clock) | Last-write-wins (client clocks) |
 | **Activity history** | Server-persisted, visible to latecomers | Broadcast only — latecomers miss offline events |
-| **Reliability** | Depends on your server uptime | Depends on NOSTR relay availability (multiple public relays; highly resilient) |
+| **Reliability** | Depends on your server uptime | Hosted relay (CF edge) + NOSTR fallback; highly resilient |
 
 ### The persistence gap
 
@@ -174,10 +213,16 @@ No additional application-level encryption is needed to protect annotation conte
 
 | Data | Visible to | Notes |
 |---|---|---|
-| Annotation content | Peers in the room only | DTLS-encrypted end-to-end |
-| Room name | NOSTR relay operators | Plain text in signaling messages |
-| IP addresses | NOSTR relay operators | Present in ICE candidates |
-| Ephemeral peer public keys | NOSTR relay operators | Trystero-generated per session; not linked to identity |
+| Annotation content | Peers in the room only | DTLS-encrypted end-to-end; no relay sees it |
+| Room name | Active relay operator | Hosted relay (project) or self-hosted relay or NOSTR relays |
+| IP addresses | Active relay operator | Present in WebSocket connection + ICE candidates |
+| Ephemeral peer public keys | NOSTR relay operators (fallback only) | Trystero-generated per session; not linked to identity |
+
+**Hosted relay (default):** the project operates the relay under a published privacy policy with zero data retention. Room names and IPs are not logged. A GDPR Data Processing Agreement is available on request.
+
+**Self-hosted relay:** the operator controls all visibility entirely — the strongest privacy posture short of running no relay at all.
+
+**NOSTR fallback:** room name and ephemeral keys visible to relay operators; IP visible via WebSocket connection. Used only when the primary relay is unreachable.
 
 ### Room name as access control
 
@@ -202,9 +247,14 @@ Example of a safe room ID:
 
 Each WebRTC connection in a room is DTLS-encrypted pairwise. Application-level encryption with a shared secret derived from the room ID would not add meaningful protection — every peer in the room already knows the room ID and is already trusted by being there. The trust boundary is room membership, not encryption.
 
-### When to use self-hosted signaling instead
+### When to use a self-hosted relay instead
 
-If the room name and user IP addresses must not be visible to any third party (e.g. internal enterprise annotation of confidential documents), use the **self-hosted signaling server** alternative (see Alternatives Considered). It is a tiny WebSocket server (~50 lines) that brokers only ICE SDP messages, stores nothing, and is fully under your control. This satisfies strict GDPR data minimisation requirements where NOSTR relay operators cannot be included in a Data Processing Agreement.
+Set `data-relay-url="wss://your-relay.example.com"` when:
+- Your organisation requires that no third party (including the project) sees room names or user IPs
+- You need a signed GDPR Data Processing Agreement with the relay operator (i.e. yourself)
+- You are annotating confidential internal documents and need full infrastructure control
+
+The relay codebase is published in `relay/` — deploy it to your own Cloudflare account, a Fly.io app, or any WebSocket-capable host. It stores nothing and requires no database.
 
 ---
 
@@ -223,47 +273,61 @@ Germany, Austria, and the Netherlands have historically seen mass Abmahnung (cea
 **3. Corporate and institutional network blocks**  
 Many enterprise networks, universities, and government institutions in Germany and across the EU firewall all BitTorrent tracker traffic at the network layer. A script that relies on BT tracker signaling silently fails to connect for these users, with no fallback.
 
-### NOSTR as the signaling backend
+### Signaling infrastructure and GDPR
 
-NOSTR relays are lightweight WebSocket servers that relay signed events. They carry no BitTorrent association, are not blocked by enterprise firewalls, and are operated by a wide variety of independent operators in multiple jurisdictions (including EU-based ones). The room name is visible to relay operators as a short string; no annotation content passes through.
+**Hosted relay (default):** operated by the project with zero data retention. No logs of room names or IP addresses are written to persistent storage. A GDPR Article 28 Data Processing Agreement is available on request. This is the recommended path for GDPR-compliant EU deployments.
 
-GDPR exposure is reduced: NOSTR relay operators are more likely to be accessible, documentable entities, and the data exchanged (a room name + ephemeral public key) is less sensitive than an IP/swarm association.
+**Self-hosted relay:** you are both the data controller and processor. Full GDPR compliance is in your hands.
 
-**For maximum privacy** (self-hosted signaling): the self-hosted signaling server alternative (see Alternatives Considered) stores no data and is fully GDPR-controllable, at the cost of reintroducing a hosting requirement.
+**NOSTR fallback:** NOSTR relay operators are third parties with no DPA relationship. NOSTR is used only as an automatic fallback when the primary relay is unreachable. Sites with strict GDPR requirements who cannot accept any NOSTR exposure should use a self-hosted relay and disable the NOSTR fallback (a build-time option, see Open Questions).
 
 ### Privacy policy guidance
 
 Sites using P2P mode should disclose in their privacy policy:
-- That WebRTC connections are established between users' browsers
-- That the room name is shared with NOSTR relay infrastructure during connection setup
+- That WebRTC connections are established directly between users' browsers
+- That a signaling relay (project-hosted, self-hosted, or NOSTR fallback) is used during connection setup to exchange peer metadata; it does not receive annotation content
 - That annotation data is transmitted directly between browsers and not stored on any server
+
+---
+
+## Open questions
 
 ### 1. Bundle strategy
 
-Trystero is published as an ES module. The current `annotate.js` is a plain IIFE with no build-time bundling — terser only minifies it. Using the NOSTR strategy requires importing from `trystero/nostr`:
+Trystero is published as an ES module. The current `annotate.js` is a plain IIFE with no build-time bundling — terser only minifies it. Using the NOSTR fallback requires importing from `trystero/nostr`:
 
 ```js
 import { joinRoom } from 'trystero/nostr'
 ```
 
 Options:
-- **(a) esbuild/rollup bundle step** — bundle `trystero/nostr` into the IIFE at build time. Clean, self-contained output. Adds a build dependency and replaces terser with esbuild (which also handles minification).
-- **(b) Dynamic `import()` at runtime** — load Trystero from a CDN (e.g. jsDelivr) when P2P mode is activated. Keeps the build simple but adds a runtime network dependency, which conflicts with the offline-first goal.
+- **(a) esbuild bundle step** — bundle `trystero/nostr` into the IIFE at build time. Clean, self-contained output. esbuild replaces terser (it handles both bundling and minification); output is still a single file.
+- **(b) Dynamic `import()` at runtime** — load Trystero from a CDN when P2P mode is activated. Keeps the build simple but adds a runtime network dependency, conflicting with the offline-first goal.
 
-**Recommendation: option (a)** — esbuild replaces terser; it handles both bundling and minification, and the output is still a single self-contained file.
+**Recommendation: option (a).**
 
-### 2. Room ID derivation
+### 2. NOSTR fallback opt-out
+
+For deployments that require zero third-party relay exposure, there should be a build-time flag to compile out the NOSTR fallback entirely. When disabled, the client uses only the configured relay (hosted or self-hosted) and fails gracefully if it is unreachable.
+
+**Recommendation: implement as an esbuild define flag** (`NOSTR_FALLBACK=false`) so it can be toggled without modifying source code.
+
+### 3. Room ID derivation
 
 Should `data-room-id` be explicit, or auto-derived from `data-site-id`?
 
 - **Explicit `data-room-id`** — clearest intent; users choose their room name deliberately
 - **Auto-derive from `data-site-id`** — simpler embed (one fewer attribute); risk that two unrelated sites using the same `siteId` string accidentally share a room
 
-**Recommendation: explicit `data-room-id`** for the initial implementation. Could add auto-derivation as a convenience later.
+**Recommendation: explicit `data-room-id`** for the initial implementation.
 
-### 3. Server + P2P simultaneously
+### 4. Hosted relay domain & branding
 
-It is architecturally possible to run both modes at once (P2P for real-time latency, server for persistence). This would give the best of both worlds but meaningfully increases implementation complexity and is out of scope for the initial P2P milestone.
+The relay URL (`wss://relay.annotatejs.io`) needs a domain decision before launch. Options: subdomain of an existing project domain, a dedicated domain, or a Cloudflare Workers subdomain (`relay.annotate-js.workers.dev`). The workers.dev subdomain requires zero DNS setup and is available immediately.
+
+### 5. Server + P2P simultaneously
+
+It is architecturally possible to run both modes at once (P2P for real-time, server for persistence). Out of scope for the initial P2P milestone.
 
 ---
 
@@ -275,9 +339,13 @@ Add same-browser multi-tab sync via the `BroadcastChannel` API. ~10 lines of cod
 
 This validates the broadcast/receive pattern and the `_rerenderAfterPull` reuse before introducing WebRTC complexity.
 
-### Phase P2 — WebRTC P2P via Trystero
+### Phase P2 — Hosted relay deployment
 
-Full cross-device P2P sync via `data-room-id`. Requires resolving the bundle strategy (Open Question 1) and implementing `initP2P` / `onPeerData`.
+Deploy the `relay/` Cloudflare Worker before shipping P2P mode. Resolve the hosted relay domain (Open Question 4). Publish the relay code and self-hosting instructions. Establish the privacy policy and DPA process.
+
+### Phase P3 — WebRTC P2P in annotate.js
+
+Full cross-device P2P sync via `data-room-id`. Requires resolving the bundle strategy (Open Question 1) and implementing `initP2P` / `onPeerData`. The NOSTR fallback is included by default; the opt-out flag (Open Question 2) ships alongside.
 
 ---
 
@@ -291,9 +359,9 @@ Trystero's `trystero/torrent` strategy uses public BitTorrent trackers for signa
 
 PeerJS offers a hosted signaling server (free tier). Simpler API than raw WebRTC, but depends on PeerJS's cloud infrastructure and requires a `peerjs` dependency. Trystero with NOSTR is preferred because it has no single point of failure and no dependency on a commercial service's free tier.
 
-### Self-hosted signaling server
+### Self-hosted relay
 
-A tiny WebSocket server (~50 lines of Node.js) that only brokers ICE SDP exchanges — no annotation data stored, no database. This is the highest-privacy option (fully GDPR-controllable, no third-party infrastructure) but reintroduces a hosting requirement, contradicting the zero-server goal. Recommended as an opt-in alternative for privacy-sensitive enterprise deployments.
+The same relay codebase published in `relay/`, deployed by the user on their own infrastructure. This is now a **first-class supported option** (not just an alternative) — it is the recommended path for enterprise deployments requiring full GDPR control. Activated via `data-relay-url`. No hosting cost argument applies here since the user has already decided to run infrastructure.
 
 ### Yjs / CRDTs
 
