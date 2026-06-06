@@ -1232,7 +1232,33 @@
     if (cards.length > 0) {
       const last = cards[cards.length - 1];
       sidebarBody.style.minHeight = ((parseInt(last.style.top) || 0) + last.offsetHeight + 16) + 'px';
+      _ensureScrollRoom(last);
+    } else {
+      document.body.style.paddingBottom = '';
     }
+  }
+
+  // Ensure the document is tall enough to scroll the bottom-most card fully
+  // into the fixed sidebar viewport.  Without this, cards anchored near the
+  // end of the page content are clipped by the 100vh sidebar boundary because
+  // the browser won't scroll past the natural document bottom.
+  //
+  // Math: card viewport-y = card.style.top + headerH − scrollY.
+  // For the card bottom to sit inside 100vh:
+  //   card.style.top + cardH + headerH − scrollY_max ≤ 100vh − slack
+  //   scrollY_max ≥ card.style.top + cardH + headerH − 100vh + slack
+  //   document.scrollHeight ≥ card.style.top + cardH + headerH + slack
+  //
+  // We inject the deficit as document.body.style.paddingBottom (inline, so we
+  // can read it back reliably and recalculate on every repositionCards call).
+  function _ensureScrollRoom(lastCard) {
+    const lastBottom  = (parseInt(lastCard.style.top) || 0) + lastCard.offsetHeight;
+    const headerH     = document.getElementById('annotate-sidebar-header').offsetHeight;
+    const neededScrollH = lastBottom + headerH + 32; // 32px breathing room
+    const currPad     = parseInt(document.body.style.paddingBottom || 0, 10);
+    const naturalH    = document.documentElement.scrollHeight - currPad;
+    const extra       = Math.max(0, neededScrollH - naturalH);
+    document.body.style.paddingBottom = extra > 0 ? extra + 'px' : '';
   }
 
   // Watch a card for height changes and re-position all cards automatically

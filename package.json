@@ -1,6 +1,6 @@
 {
   "name": "annotate-server",
-  "version": "0.4.7",
+  "version": "0.4.8",
   "description": "Lightweight inline annotation and threaded comments for any web page — added via a single <script> tag.",
   "main": "server/index.js",
   "engines": {
