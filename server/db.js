@@ -17,6 +17,7 @@ db.exec(`
     anchor      TEXT NOT NULL,
     body        TEXT NOT NULL,
     author      TEXT NOT NULL,
+    author_id   TEXT,
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL,
     resolved    INTEGER NOT NULL DEFAULT 0,
@@ -32,6 +33,10 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_threads_updated
     ON threads (site_id, page_url, updated_at);
 `);
+
+// Idempotent runtime migration — adds author_id to existing databases.
+// The try/catch is intentional: SQLite throws if the column already exists.
+try { db.exec('ALTER TABLE threads ADD COLUMN author_id TEXT'); } catch (_) {}
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS activity (
@@ -63,6 +68,7 @@ function rowToThread(row) {
     anchor:     JSON.parse(row.anchor),
     body:       row.body,
     author:     row.author,
+    authorId:   row.author_id || null,
     createdAt:  row.created_at,
     updatedAt:  row.updated_at,
     resolved:   row.resolved === 1,
@@ -83,6 +89,7 @@ function threadToRow(thread) {
     anchor:      JSON.stringify(thread.anchor || null),
     body:        thread.body,
     author:      thread.author,
+    author_id:   thread.authorId || null,
     created_at:  thread.createdAt,
     updated_at:  thread.updatedAt,
     resolved:    thread.resolved ? 1 : 0,
