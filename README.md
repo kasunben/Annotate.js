@@ -333,6 +333,7 @@ No automated test suite. Three demo pages available after `npm start`:
 - [ ] Clear all annotations, then **Import from file…** the downloaded JSON → threads reappear without reload; Activity tab shows a blue-dot `data_imported` entry
 - [ ] Import the same file again → alert "Import complete — all threads are already up to date."
 - [ ] Delete a thread, then import a backup made before the deletion → thread is restored; Activity tab shows `data_imported (1 restored)`
+- [ ] **Multi-browser import**: delete threads on Browser A, import a pre-deletion export on Browser A (while on the Settings tab) → threads appear immediately on Browser A at the correct page positions; Browser B (connected via P2P or server-sync) also shows correct positions without reloading either browser
 
 **Access control checklist** (server-sync or P2P, two browser profiles):
 - [ ] User A creates a thread → User B sees the thread but no Edit / Delete menu on it
