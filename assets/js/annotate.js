@@ -1,3 +1,8 @@
+// esbuild bundles trystero/nostr at build time — no runtime network fetch needed.
+// In offline-only or server-sync mode (_roomId is null) this import is dead code
+// that tree-shaking / minification will remove automatically.
+import { joinRoom as _trysteroJoin } from 'trystero/nostr';
+
 (function () {
   'use strict';
 
@@ -286,7 +291,42 @@
   let   _lastSync         = null; // ISO 8601 — max updatedAt seen from server; drives incremental pulls
   let   _lastActivitySync = null; // ISO 8601 — max timestamp seen from server; drives activity incremental pulls
 
+  // ── P2P state ──────────────────────────────────────────────────────────────
+  // Activated by data-room-id. Mutually exclusive with data-sync-url (server sync).
+  const _roomId    = (document.currentScript && document.currentScript.dataset.roomId)   || null;
+  const _relayUrl  = (document.currentScript && document.currentScript.dataset.relayUrl) || 'wss://relay.annotate-js.workers.dev';
+  // No-ops replaced by initP2P() when a room is active.
+  let _p2pBroadcastThread   = function () {};
+  let _p2pBroadcastActivity = function () {};
+
   console.log('Annotate.js loaded — site:', _siteId);
+
+  // ── BroadcastChannel — same-origin multi-tab sync (zero dependencies) ─────
+  // Broadcasts every local mutation to other tabs on the same origin, so tabs
+  // stay in sync without a server or WebRTC. Gracefully absent in workers /
+  // environments that don't implement BroadcastChannel.
+  var _bc = (typeof BroadcastChannel !== 'undefined' && _siteId)
+    ? new BroadcastChannel('annotate-' + _siteId)
+    : null;
+
+  if (_bc) {
+    _bc.onmessage = function (ev) {
+      var msg = ev.data;
+      if (!_db) return;
+      if (msg.type === 'THREAD_UPDATE') {
+        dbGetThread(_db, msg.thread.id).then(function (existing) {
+          if (!existing || msg.thread.updatedAt > existing.updatedAt) {
+            dbSaveThread(_db, msg.thread).then(function () {
+              _rerenderAfterPull([msg.thread]);
+            });
+          }
+        });
+      }
+      if (msg.type === 'ACTIVITY_UPDATE') {
+        dbAddActivity(_db, msg.entry);
+      }
+    };
+  }
 
   // --- Styles ---
   const style = document.createElement('style');
@@ -1508,6 +1548,9 @@
 
   /** Push one activity entry to the server. Fire-and-forget. */
   function syncActivity(entry) {
+    // Broadcast to same-origin tabs and P2P peers regardless of server-sync mode.
+    if (_bc) _bc.postMessage({ type: 'ACTIVITY_UPDATE', entry: entry });
+    _p2pBroadcastActivity(entry);
     if (!_syncUrl) return;
     fetch(_syncUrl + '/activity', {
       method:  'POST',
@@ -1545,8 +1588,12 @@
   /**
    * Push a single thread to the server after a local mutation.
    * Fire-and-forget: clears dirty=false on success, logs a warning on failure.
+   * Also broadcasts to same-origin tabs (BroadcastChannel) and P2P peers.
    */
   function syncThread(thread) {
+    // Broadcast to same-origin tabs and P2P peers regardless of server-sync mode.
+    if (_bc) _bc.postMessage({ type: 'THREAD_UPDATE', thread: thread });
+    _p2pBroadcastThread(thread);
     if (!_syncUrl || !_db) return;
     var payload = Object.assign({}, thread);
     delete payload.dirty;
@@ -1563,6 +1610,276 @@
       if (t && t.dirty) { t.dirty = false; return dbSaveThread(_db, t); }
     })
     .catch(function (e) { console.warn('Annotate.js: syncThread failed', e); });
+  }
+
+  // ── P2P sync functions ────────────────────────────────────────────────────
+  //
+  // These functions implement the three-tier P2P signaling strategy:
+  //   Tier 1/2 — Custom WebSocket relay (hosted or self-hosted)
+  //   Tier 3   — NOSTR signaling via Trystero (automatic fallback)
+  //
+  // Activated only when data-room-id is present on the script tag.
+  // No-ops (and zero overhead) when _roomId is null.
+
+  /** Merge a thread received from any peer into IDB and update the DOM. */
+  function _onPeerThread(incoming) {
+    if (!_db) return;
+    dbGetThread(_db, incoming.id).then(function (existing) {
+      if (!existing || incoming.updatedAt > existing.updatedAt) {
+        dbSaveThread(_db, incoming).then(function () {
+          _rerenderAfterPull([incoming]);
+        });
+      }
+    });
+  }
+
+  /** Merge an activity entry received from any peer into IDB. */
+  function _onPeerActivity(entry) {
+    if (_db) dbAddActivity(_db, entry);
+  }
+
+  // ── Relay tier (Tier 1/2): custom WebSocket signaling + RTCPeerConnection ─
+
+  /**
+   * Wire up the onmessage handler for a WebRTC data channel.
+   * Handles: THREAD, ACTIVITY, REQUEST_STATE, STATE_SNAPSHOT messages.
+   */
+  function _setupDataChannelMessages(dc) {
+    dc.onmessage = function (ev) {
+      var msg;
+      try { msg = JSON.parse(ev.data); } catch (e) { return; }
+      if (msg.type === 'THREAD')   { _onPeerThread(msg.thread);   return; }
+      if (msg.type === 'ACTIVITY') { _onPeerActivity(msg.entry);  return; }
+      if (msg.type === 'REQUEST_STATE') {
+        _dbGetByPage(_db, _pageUrl).then(function (threads) {
+          if (dc.readyState === 'open')
+            dc.send(JSON.stringify({ type: 'STATE_SNAPSHOT', threads: threads }));
+        });
+        return;
+      }
+      if (msg.type === 'STATE_SNAPSHOT') {
+        var all = msg.threads || [];
+        var chain = Promise.resolve();
+        all.forEach(function (t) {
+          chain = chain.then(function () {
+            return dbGetThread(_db, t.id).then(function (existing) {
+              if (!existing || t.updatedAt > existing.updatedAt) return dbSaveThread(_db, t);
+            });
+          });
+        });
+        chain.then(function () { _rerenderAfterPull(all); });
+      }
+    };
+  }
+
+  /**
+   * Create an RTCPeerConnection offer toward a newly-joined peer.
+   * Called by the existing peer when the relay signals `peer-joined`.
+   */
+  function _createRelayOffer(remotePeerId, ws, myPeerId, peers) {
+    var pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+    var dc = pc.createDataChannel('annotate');
+    peers[remotePeerId] = { pc: pc, dc: dc };
+    _setupDataChannelMessages(dc);
+
+    pc.onicecandidate = function (ev) {
+      if (ev.candidate)
+        ws.send(JSON.stringify({ type: 'signal', to: remotePeerId, from: myPeerId,
+                                 data: { candidate: ev.candidate } }));
+    };
+    pc.createOffer()
+      .then(function (offer) { return pc.setLocalDescription(offer); })
+      .then(function () {
+        ws.send(JSON.stringify({ type: 'signal', to: remotePeerId, from: myPeerId,
+                                 data: { sdp: pc.localDescription } }));
+      })
+      .catch(function (e) { console.warn('Annotate.js P2P: offer failed', e); });
+  }
+
+  /**
+   * Handle an incoming signal message forwarded by the relay (SDP offer/answer
+   * or ICE candidate). Creates the answerer RTCPeerConnection on first contact.
+   */
+  function _handleRelaySignal(msg, ws, myPeerId, peers) {
+    var senderId = msg.from;
+    var data     = msg.data;
+
+    if (!peers[senderId]) {
+      // First contact from this peer — we are the answerer.
+      var pc2 = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+      peers[senderId] = { pc: pc2, dc: null };
+
+      pc2.ondatachannel = function (ev) {
+        peers[senderId].dc = ev.channel;
+        _setupDataChannelMessages(ev.channel);
+        ev.channel.onopen = function () {
+          // As the later joiner, request the existing peer's full state.
+          ev.channel.send(JSON.stringify({ type: 'REQUEST_STATE', pageUrl: _pageUrl }));
+        };
+      };
+      pc2.onicecandidate = function (ev) {
+        if (ev.candidate)
+          ws.send(JSON.stringify({ type: 'signal', to: senderId, from: myPeerId,
+                                   data: { candidate: ev.candidate } }));
+      };
+    }
+
+    var pc = peers[senderId].pc;
+    if (data.sdp) {
+      if (data.sdp.type === 'offer') {
+        pc.setRemoteDescription(data.sdp)
+          .then(function () { return pc.createAnswer(); })
+          .then(function (ans) { return pc.setLocalDescription(ans); })
+          .then(function () {
+            ws.send(JSON.stringify({ type: 'signal', to: senderId, from: myPeerId,
+                                     data: { sdp: pc.localDescription } }));
+          })
+          .catch(function (e) { console.warn('Annotate.js P2P: answer failed', e); });
+      } else if (data.sdp.type === 'answer') {
+        pc.setRemoteDescription(data.sdp).catch(function () {});
+      }
+    }
+    if (data.candidate) {
+      pc.addIceCandidate(data.candidate).catch(function () {});
+    }
+  }
+
+  /**
+   * Tier 1/2: connect to the hosted or self-hosted WebSocket relay and establish
+   * per-peer RTCPeerConnections for annotation data.
+   *
+   * Calls onConnected() once the WebSocket opens successfully (so initP2P can
+   * cancel the NOSTR fallback timer). Calls onFailure() on connection error.
+   */
+  function _initRelayP2P(relayUrl, onConnected, onFailure) {
+    var myPeerId = generateId();
+    var peers    = {};
+    var ws;
+
+    try {
+      ws = new WebSocket(relayUrl + '/room/' + encodeURIComponent(_roomId));
+    } catch (e) {
+      onFailure(e);
+      return;
+    }
+
+    ws.onopen = function () {
+      onConnected();
+      ws.send(JSON.stringify({ type: 'join', room: _roomId, peerId: myPeerId }));
+    };
+    ws.onmessage = function (ev) {
+      var msg;
+      try { msg = JSON.parse(ev.data); } catch (e) { return; }
+      if (msg.type === 'peer-joined') _createRelayOffer(msg.peerId, ws, myPeerId, peers);
+      if (msg.type === 'signal')      _handleRelaySignal(msg, ws, myPeerId, peers);
+      if (msg.type === 'peer-left' && peers[msg.peerId]) {
+        peers[msg.peerId].pc.close(); delete peers[msg.peerId];
+      }
+    };
+    ws.onerror = function (e) { onFailure(e); };
+    ws.onclose = function (ev) {
+      if (!ev.wasClean) {
+        console.warn('Annotate.js P2P: relay disconnected — falling back to NOSTR');
+        _initNostrP2P();
+      }
+    };
+
+    _p2pBroadcastThread = function (t) {
+      Object.keys(peers).forEach(function (pid) {
+        var p = peers[pid];
+        if (p.dc && p.dc.readyState === 'open')
+          p.dc.send(JSON.stringify({ type: 'THREAD', thread: t }));
+      });
+    };
+    _p2pBroadcastActivity = function (e) {
+      Object.keys(peers).forEach(function (pid) {
+        var p = peers[pid];
+        if (p.dc && p.dc.readyState === 'open')
+          p.dc.send(JSON.stringify({ type: 'ACTIVITY', entry: e }));
+      });
+    };
+  }
+
+  // ── NOSTR tier (Tier 3): Trystero fallback ─────────────────────────────────
+
+  /**
+   * Tier 3: use NOSTR relay network (via Trystero) for signaling.
+   * Bundled at build time by esbuild — zero runtime network fetch for the library.
+   * Used automatically when the relay is unreachable.
+   */
+  function _initNostrP2P() {
+    var room;
+    try {
+      room = _trysteroJoin({ appId: _siteId }, _roomId);
+    } catch (e) {
+      console.warn('Annotate.js P2P: NOSTR init failed', e);
+      return;
+    }
+
+    var threadPair   = room.makeAction('thread');
+    var activityPair = room.makeAction('activity');
+    var requestPair  = room.makeAction('request');
+    var snapshotPair = room.makeAction('snapshot');
+
+    var sendThread   = threadPair[0],   getThread   = threadPair[1];
+    var sendActivity = activityPair[0], getActivity = activityPair[1];
+    var sendRequest  = requestPair[0],  getRequest  = requestPair[1];
+    var sendSnapshot = snapshotPair[0], getSnapshot = snapshotPair[1];
+
+    getThread(function (data)   { _onPeerThread(data); });
+    getActivity(function (data) { _onPeerActivity(data); });
+    getRequest(function (data, peerId) {
+      _dbGetByPage(_db, _pageUrl).then(function (threads) {
+        sendSnapshot({ threads: threads }, [peerId]);
+      });
+    });
+    getSnapshot(function (data) {
+      var all = data.threads || [];
+      var chain = Promise.resolve();
+      all.forEach(function (t) {
+        chain = chain.then(function () {
+          return dbGetThread(_db, t.id).then(function (existing) {
+            if (!existing || t.updatedAt > existing.updatedAt) return dbSaveThread(_db, t);
+          });
+        });
+      });
+      chain.then(function () { _rerenderAfterPull(all); });
+    });
+
+    room.onPeerJoin(function (peerId) {
+      // As the later-joining peer, request state from the existing peer.
+      sendRequest({ pageUrl: _pageUrl }, [peerId]);
+    });
+
+    _p2pBroadcastThread   = function (t) { sendThread(t); };
+    _p2pBroadcastActivity = function (e) { sendActivity(e); };
+  }
+
+  // ── P2P entry point ────────────────────────────────────────────────────────
+
+  /**
+   * Initialise P2P mode. Tries the hosted/self-hosted relay first; falls back
+   * to NOSTR automatically if the relay is unreachable within 5 seconds.
+   * No-op when data-room-id is absent.
+   */
+  function initP2P() {
+    if (!_roomId || !_db) return;
+
+    var settled       = false;
+    var fallbackTimer = setTimeout(function () {
+      if (!settled) { settled = true; _initNostrP2P(); }
+    }, 5000);
+
+    _initRelayP2P(
+      _relayUrl,
+      /* onConnected */ function () {
+        // Relay WebSocket opened — cancel the NOSTR fallback.
+        if (!settled) { settled = true; clearTimeout(fallbackTimer); }
+      },
+      /* onFailure */ function () {
+        if (!settled) { settled = true; clearTimeout(fallbackTimer); _initNostrP2P(); }
+      }
+    );
   }
 
   /**
@@ -1939,6 +2256,7 @@
           if (document.visibilityState === 'visible') { pullThreads(); pullActivity(); }
         });
       }
+      if (_roomId) { initP2P(); }
     })
     .catch(function (err) {
       console.warn('Annotate.js: IndexedDB unavailable — running in memory-only mode', err);

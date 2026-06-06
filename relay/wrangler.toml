@@ -1,0 +1,29 @@
+# Annotate.js WebSocket relay — Cloudflare Workers configuration
+#
+# Deploy:
+#   cd relay
+#   npx wrangler deploy
+#
+# The relay URL after deployment will look like:
+#   wss://annotate-relay.<your-subdomain>.workers.dev
+#
+# To use your own relay, set data-relay-url on the script tag:
+#   <script src="annotate.min.js"
+#           data-room-id="your-uuid"
+#           data-relay-url="wss://annotate-relay.<your-subdomain>.workers.dev">
+
+name              = "annotate-relay"
+main              = "worker.js"
+compatibility_date = "2025-01-01"
+
+# Durable Objects — one RoomDO instance per room ID.
+# Room state is fully ephemeral (no SQLite, no KV storage needed).
+[durable_objects]
+bindings = [
+  { name = "ROOMS", class_name = "RoomDO" }
+]
+
+# Required migration to register the Durable Object class with Cloudflare.
+[[migrations]]
+tag         = "v1"
+new_classes = ["RoomDO"]
