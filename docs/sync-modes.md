@@ -76,6 +76,8 @@ Activated by adding `data-sync-url` to the script tag. Requires the Node.js + SQ
 
 ## Mode 4 — P2P (WebRTC)
 
+> **Requires `annotate.min.js`** — the bundled build, not the raw source. Trystero (NOSTR signaling) is injected into the bundle at build time by esbuild. The raw `assets/js/annotate.js` is a classic `<script>` tag that cannot use ES module imports, so Trystero is never available there. Setting `data-room-id` on the raw source causes all signaling tiers to fail silently — annotations save to local IDB only. Use the CDN build or run `npm run build` locally.
+
 Activated by adding `data-room-id` to the script tag. No server required. Annotation content flows directly browser-to-browser over DTLS-encrypted WebRTC data channels — no relay ever sees it.
 
 ```html

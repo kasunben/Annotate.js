@@ -31,7 +31,7 @@ Annotate.js has four sync modes. Modes 1 and 2 are always active with zero confi
 | **4 — P2P** | `data-room-id="<uuid>"` | Any browser, encrypted peer-to-peer | No (signaling relay only) |
 
 ### Mode 1 — Offline (default)
-Annotations are saved to IndexedDB and survive page reloads. No network required. Works with the raw `annotate.js` source file — no build step needed.
+Annotations are saved to IndexedDB and survive page reloads. No network required. Works with the raw `annotate.js` source file — no build step needed. **Raw `annotate.js` supports Modes 1, 2, and 3 only. Mode 4 (P2P) requires `annotate.min.js`** — see [P2P sync requirements](#p2p-sync-no-server-required).
 
 ### Mode 2 — BroadcastChannel (automatic)
 Layered on top of Mode 1 at zero cost. Any tabs open on the **same origin in the same browser** stay in sync instantly — no server, no WebRTC, no configuration. Uses the built-in [BroadcastChannel API](https://developer.mozilla.org/en-US/docs/Web/API/BroadcastChannel).
@@ -72,11 +72,13 @@ The fallback is automatic — if the relay WebSocket fails to connect within 5 s
 
 `annotate.min.js` is committed to the repo on every release, so jsDelivr serves it directly from the git tag — no build step needed on your end.
 
-**Or load the raw source locally (development only — no P2P/Trystero):**
+**Or load the raw source locally (offline + server-sync only — no P2P):**
 
 ```html
 <script src="annotate.js" data-site-id="my-site"></script>
 ```
+
+> **P2P requires `annotate.min.js`.** The raw source is a classic `<script>` tag and cannot use ES module imports, so Trystero (the NOSTR signaling library) is never available. If `data-room-id` is set on the raw source, all signaling tiers fail silently and annotations save to local IDB only — nothing reaches other peers. Always use `annotate.min.js` (CDN or locally built) for P2P mode.
 
 In all cases, annotations are stored in IndexedDB and survive page reloads.
 
@@ -122,6 +124,8 @@ To test multi-user sync, open the second URL in two browser windows and annotate
 
 ## P2P sync (no server required)
 
+> **Requirements:** P2P mode requires `annotate.min.js` (CDN or locally built via `npm run build`). The raw source file `assets/js/annotate.js` does **not** support P2P — see [Troubleshooting](#raw-source-annotate-js--p2p-doesnt-work) for details.
+
 Add `data-room-id` to the script tag instead of `data-sync-url`:
 
 ```html
@@ -166,6 +170,10 @@ Browser A                  Relay (signaling only)          Browser B
 | Activity history | Server-persisted | Broadcast only — latecomers miss offline events |
 
 P2P is ideal for **live collaborative review sessions**. For async annotation over days, server sync provides better durability.
+
+### Access control in P2P mode
+
+Each browser has a persistent UUID (`annotate_author_id` in `localStorage`) attached to every thread and reply. Edit and Delete buttons are only shown to the browser that created the item — other users see the thread but cannot modify it. Anyone can mark a thread Resolved (collaborative action). The Settings tab does not show a "Clear" button in P2P mode — bulk-wiping local state while peers are online would leave the room inconsistent.
 
 ---
 
@@ -251,7 +259,7 @@ Annotate.js/
 | `POST` | `/threads/:id/replies` | Add reply |
 | `PATCH` | `/threads/:id/replies/:replyId` | Edit reply |
 | `DELETE` | `/threads/:id/replies/:replyId` | Soft-delete reply |
-| `DELETE` | `/threads?siteId=` | Hard-delete all threads for a site (Settings → Clear all) |
+| `DELETE` | `/threads?siteId=[&authorId=]` | Delete threads for a site; scoped to `authorId` when provided (Settings → Clear my annotations); unscoped = admin delete-all |
 | `GET` | `/activity?siteId=&pageUrl=[&since=]` | Fetch activity for page; `since` for incremental pull |
 | `POST` | `/activity` | Push one activity entry (`INSERT OR IGNORE` — entries are immutable) |
 | `DELETE` | `/activity?siteId=` | Hard-delete all activity for a site (Settings → Clear all) |
@@ -265,7 +273,7 @@ Annotate.js/
 | **Threads** | Active annotations for the current page |
 | **Resolved** | Resolved annotations (read-only) |
 | **Activity** | Shared event feed — all users' creates, replies, edits, resolves, deletes |
-| **Settings** | Display name · Clear all annotations |
+| **Settings** | Display name · "Clear all annotations" (offline/BC mode) or "Clear my annotations" (server sync mode); no clear button in P2P mode |
 
 ---
 
@@ -304,7 +312,7 @@ No automated test suite. Three demo pages available after `npm start`:
 - [ ] Replies persist across reload
 - [ ] Resolved tab shows resolved threads
 - [ ] Activity tab shows all events
-- [ ] Settings → Clear all → sidebar empties immediately, stays empty after reload
+- [ ] Settings → "Clear all annotations" (offline) or "Clear my annotations" (server sync) → sidebar empties, stays empty after reload
 
 **Sync checklist** (use `demo-sync-with-server.html` in two windows):
 - [ ] User A annotates → User B sees it within 30 s (or on tab focus)
@@ -314,7 +322,8 @@ No automated test suite. Three demo pages available after `npm start`:
 - [ ] Restart server → User A's offline annotations push automatically
 - [ ] User A annotates → User B's Activity tab shows `thread_created` within 30 s
 - [ ] User A resolves → User B's Activity tab shows `thread_resolved` within 30 s
-- [ ] Settings → Clear all on User A → User B's Activity tab empties on next pull
+- [ ] Settings → "Clear my annotations" on User A → only User A's threads gone; User B's threads remain
+- [ ] User A's activity tab empties on next pull for User B
 
 ---
 
@@ -356,6 +365,17 @@ All three are **expected and harmless**:
 | Trystero rate-limited from relay.damus.io | NOSTR relay throttles rapid reconnects during testing | None — Trystero tries its other 7+ relays |
 
 P2P will still work. The warnings disappear once the hosted Cloudflare relay is deployed (see [Roadmap](#roadmap)).
+
+### Raw source (`annotate.js`) + P2P doesn't work
+
+**Symptom:** You changed the `<script src>` to `assets/js/annotate.js` in `demo-p2p.html`. Annotations save locally but never appear in the other browser. The console shows:
+```
+Annotate.js P2P: data-room-id is set but Trystero is not available. P2P mode requires the bundled build…
+```
+
+**Cause:** The raw source is a classic `<script>` tag and cannot `import` ES modules. Trystero (the NOSTR signaling library) is only available in `annotate.min.js` — it is injected at build time by esbuild via `--inject:assets/js/trystero-shim.js`. Without Trystero, the NOSTR fallback (Tier 3) is a no-op, and the hosted relay (Tier 1) is not yet deployed, so all signaling paths fail.
+
+**Fix:** Use `annotate.min.js` for P2P. Either serve it locally after `npm run build`, or use the jsDelivr CDN. The raw source is for Modes 1–3 (offline + server sync) only.
 
 ---
 
@@ -420,5 +440,7 @@ Point `src` at your deployed server and you're done:
 ## Roadmap
 
 - [ ] Deploy hosted relay to `wss://relay.annotate-js.workers.dev` (relay code in `relay/` is ready)
-- [ ] Authentication / per-user access control
 - [ ] User account registration + annotation profile management (Milestone 2)
+
+**Shipped:**
+- [x] Ownership-based access control — Edit/Delete gated per browser; Resolve open to all; offline mode unrestricted
