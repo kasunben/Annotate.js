@@ -1650,6 +1650,47 @@
     }).catch(function (e) { console.warn('Annotate.js: _renderActivityTab failed', e); });
   }
 
+  /**
+   * When the user renames themselves in Settings, backfill the new name onto
+   * every Thread and Reply they authored (matched by authorId).  Bumps updatedAt
+   * so the change propagates to other users via the normal sync path.
+   */
+  function _renameAuthorEverywhere(newName) {
+    if (!_db) return;
+    var tx    = _db.transaction(['threads'], 'readwrite');
+    var store = tx.objectStore('threads');
+    var req   = store.getAll();
+    req.onsuccess = function () {
+      var changed = [];
+      (req.result || []).forEach(function (t) {
+        var modified = false;
+        if (t.authorId === _authorId && t.author !== newName) {
+          t.author   = newName;
+          modified   = true;
+        }
+        if (t.replies) {
+          t.replies.forEach(function (r) {
+            if (r.authorId === _authorId && r.author !== newName) {
+              r.author = newName;
+              modified = true;
+            }
+          });
+        }
+        if (modified) {
+          t.updatedAt = new Date().toISOString();
+          t.dirty     = true;
+          store.put(t);
+          changed.push(t);
+        }
+      });
+      tx.oncomplete = function () {
+        changed.forEach(function (t) { syncThread(t); });
+        if (changed.length) _rerenderAfterPull(changed);
+      };
+    };
+    tx.onerror = function () { console.warn('Annotate.js: _renameAuthorEverywhere failed', tx.error); };
+  }
+
   /** Settings tab — display name + clear data */
   function _renderSettingsTab() {
     // Hide the bulk-clear button in P2P and server-sync modes. In P2P, wiping
@@ -1691,7 +1732,12 @@
     const nameInput = _panelSettings.querySelector('#annotate-name-input');
     function _saveName() {
       const name = nameInput.value.trim();
-      if (name) localStorage.setItem(_AUTHOR_KEY, name);
+      if (!name) return;
+      const oldName = getAuthor();
+      localStorage.setItem(_AUTHOR_KEY, name);
+      // If the name actually changed, backfill the new name onto all existing
+      // threads and replies this author owns so the UI reflects it everywhere.
+      if (name !== oldName) _renameAuthorEverywhere(name);
     }
     nameInput.addEventListener('blur', _saveName);
     nameInput.addEventListener('keydown', function (e) {
