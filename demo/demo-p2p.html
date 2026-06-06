@@ -124,6 +124,22 @@
 
     Optional: data-relay-url="wss://your-relay.example.com" to use a self-hosted relay.
     Omit it to use the project's hosted relay (with automatic NOSTR fallback).
+
+    ⚠️  IMPORTANT — this demo MUST use annotate.min.js, not assets/js/annotate.js.
+
+    P2P mode depends on Trystero (NOSTR signaling) which is bundled into
+    annotate.min.js at build time via esbuild --inject:assets/js/trystero-shim.js.
+    The raw source (assets/js/annotate.js) is a classic <script> tag that cannot
+    use ES module imports, so Trystero is never available there.
+
+    Without Trystero:
+      - The hosted relay (wss://relay.annotate-js.workers.dev) is not yet deployed → Tier 1 fails.
+      - The NOSTR fallback guard fires immediately → Tier 3 fails.
+      - _p2pBroadcastThread / _p2pBroadcastActivity remain no-op stubs.
+      - Annotations save to local IDB only; nothing reaches the other browser.
+
+    Use assets/js/annotate.js only for demo.html and demo-sync-with-server.html
+    (offline and server-sync modes, which have no Trystero dependency).
   -->
   <script
     src="../annotate.min.js"

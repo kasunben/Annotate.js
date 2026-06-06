@@ -1949,6 +1949,19 @@
   function initP2P() {
     if (!_roomId || !_db) return;
 
+    // Warn immediately if Trystero is not available (raw source loaded directly).
+    // All three signaling tiers will fail: the hosted relay is not yet deployed
+    // (Tier 1 fails), and the NOSTR fallback requires Trystero (Tier 3 fails).
+    // P2P mode requires the bundled build — use annotate.min.js, not annotate.js.
+    if (typeof _trysteroJoin !== 'function') {
+      console.warn(
+        'Annotate.js P2P: data-room-id is set but Trystero is not available. ' +
+        'P2P mode requires the bundled build (annotate.min.js). ' +
+        'The raw source (annotate.js) does not include Trystero — all signaling tiers will fail. ' +
+        'Annotations will save locally only and will not reach other peers.'
+      );
+    }
+
     var settled       = false;
     var fallbackTimer = setTimeout(function () {
       if (!settled) { settled = true; _initNostrP2P(); }
