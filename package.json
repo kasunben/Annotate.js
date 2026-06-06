@@ -1,7 +1,7 @@
 {
   "name": "annotate-server",
-  "version": "0.3.3",
-  "description": "Lightweight backend for Annotate.js — multi-user sync via SQLite",
+  "version": "0.3.2",
+  "description": "Lightweight inline annotation and threaded comments for any web page — added via a single <script> tag.",
   "main": "server/index.js",
   "engines": {
     "node": ">=23"
