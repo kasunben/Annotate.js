@@ -1636,6 +1636,7 @@
            target="_blank" rel="noopener">View on GitHub</a>
       </div>`;
     _panelSettings.innerHTML = `
+      ${aboutHtml}
       <div class="annotate-settings-group">
         <label class="annotate-settings-label">Display name</label>
         <input class="annotate-settings-input" id="annotate-name-input" type="text"
@@ -1643,7 +1644,6 @@
         <p class="annotate-settings-hint">Shown on all your annotations and replies.</p>
       </div>
       ${clearGroupHtml}
-      ${aboutHtml}
     `;
 
     const nameInput = _panelSettings.querySelector('#annotate-name-input');
