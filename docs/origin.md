@@ -18,7 +18,7 @@ So I looked at what already existed. Apparently, [Annotator.js](https://github.c
 
 The gap was obvious.
 
-So I decided to build something from scratch using Claude Code, rather rely on something not exactly address the problem. At the same time, I wanted to aim a little higher because I believed the problem was not limited to this particular use case. It remains a major obstacle for people trying to move away from platforms like Google Docs while still maintaining effective collaboration and review workflows.
+So I decided to build something from scratch using `Claude Code`, rather rely on something not exactly address the problem. At the same time, I wanted to aim a little higher because I believed the problem was not limited to this particular use case. It remains a major obstacle for people trying to move away from platforms like Google Docs while still maintaining effective collaboration and review workflows.
 
 So, that’s the origin.
 

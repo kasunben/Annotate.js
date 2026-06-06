@@ -5,8 +5,9 @@ Lightweight inline annotation and threaded comments for any web page — added v
 ![Demo screenshot showing highlighted text and comment sidebar](docs/screenshot.png)
 
 > Annotate.js was initially built to solve a specific problem: adding inline comments to a published
-> HTML document — a citizen proposal on child rights — without Google Docs and without a
-> heavy backend. [Read the full story →](docs/origin.md)
+> HTML document — a citizen proposal on child rights — without Google Docs and without a heavy backend.
+>
+> [Read the full story →](docs/origin.md)
 
 ---
 
