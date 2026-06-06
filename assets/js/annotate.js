@@ -1366,11 +1366,21 @@
     card._lastRenderedAt = thread.updatedAt;
     const cardBody = card.querySelector('.annotate-card-body');
     const isOwner = _isOwner(thread);
+    // Resolved threads are frozen: Delete is hidden for everyone (so the
+    // record cannot be wiped), Reply is hidden (the conversation is closed),
+    // and the Resolve button becomes Un-Resolve. Edit stays available to the
+    // owner so they can still correct text on a resolved record.
+    var menuItemsHtml = '';
+    if (isOwner) {
+      menuItemsHtml += '<button class="annotate-dropdown-item annotate-edit-btn">Edit</button>';
+      if (!thread.resolved) {
+        menuItemsHtml += '<button class="annotate-dropdown-item danger annotate-delete-btn">Delete</button>';
+      }
+    }
     const threadMenuHtml = isOwner
       ? `<button class="annotate-icon-btn annotate-menu-btn" title="More">${_MENU_SVG}</button>
               <div class="annotate-dropdown hidden">
-                <button class="annotate-dropdown-item annotate-edit-btn">Edit</button>
-                <button class="annotate-dropdown-item danger annotate-delete-btn">Delete</button>
+                ${menuItemsHtml}
               </div>`
       : '';
     cardBody.innerHTML = `
@@ -1386,25 +1396,38 @@
           </div>
           <p class="annotate-note-text">${thread.body}</p>
           <div class="annotate-action-row">
-            <button class="annotate-action-btn annotate-reply-trigger">Reply</button>
-            <button class="annotate-action-btn annotate-resolve-btn">Resolve</button>
+            ${thread.resolved ? '' : '<button class="annotate-action-btn annotate-reply-trigger">Reply</button>'}
+            <button class="annotate-action-btn annotate-resolve-btn">${thread.resolved ? 'Un-Resolve' : 'Resolve'}</button>
           </div>
         </div>
       </div>
     `;
 
-    // Resolve — anyone can resolve (collaborative action, not gated by ownership)
+    // Resolve / Un-Resolve — both open to anyone (collaborative action, not
+    // gated by ownership). The same button toggles the state based on what
+    // the thread currently is.
     cardBody.querySelector('.annotate-resolve-btn').addEventListener('click', function () {
       if (_db) {
         dbGetThread(_db, thread.id).then(function (t) {
           if (!t) return;
           const who = getAuthor();
-          t.resolved = true; t.resolvedAt = new Date().toISOString(); t.resolvedBy = who; t.updatedAt = new Date().toISOString(); t.dirty = true;
+          const isUnresolve = !!t.resolved;
+          if (isUnresolve) {
+            t.resolved = false; t.resolvedAt = null; t.resolvedBy = null;
+          } else {
+            t.resolved = true;  t.resolvedAt = new Date().toISOString(); t.resolvedBy = who;
+          }
+          t.updatedAt = new Date().toISOString();
+          t.dirty = true;
           return dbSaveThread(_db, t).then(function () {
             syncThread(t);
-            return logActivity('thread_resolved', t.id, null, who, 'resolved thread');
+            return logActivity(
+              isUnresolve ? 'thread_unresolved' : 'thread_resolved',
+              t.id, null, who,
+              isUnresolve ? 'un-resolved thread' : 'resolved thread'
+            );
           });
-        }).catch(function (e) { console.warn('Annotate.js: resolve persist failed', e); });
+        }).catch(function (e) { console.warn('Annotate.js: resolve toggle persist failed', e); });
       }
       card.style.opacity = '0.4';
       card.style.pointerEvents = 'none';
@@ -1495,9 +1518,13 @@
 
     card.appendChild(replies);
 
-    cardBody.querySelector('.annotate-reply-trigger').addEventListener('click', function () {
-      openReplyComposer(replies, card);
-    });
+    // Reply trigger only exists on non-resolved cards.
+    const replyTrigger = cardBody.querySelector('.annotate-reply-trigger');
+    if (replyTrigger) {
+      replyTrigger.addEventListener('click', function () {
+        openReplyComposer(replies, card);
+      });
+    }
   }
 
   /**
@@ -1566,10 +1593,9 @@
           <div class="annotate-card-body"></div>
         `;
         _panelResolved.appendChild(card);
+        // _renderSavedCard handles the resolved-state UI:
+        // hides Reply + Delete, swaps Resolve label to Un-Resolve.
         _renderSavedCard(card, thread);
-        // Resolved threads are read-only — hide Reply / Resolve actions
-        const actionRow = card.querySelector('.annotate-action-row');
-        if (actionRow) actionRow.style.display = 'none';
       });
     }).catch(function (e) { console.warn('Annotate.js: _renderResolvedTab failed', e); });
   }
