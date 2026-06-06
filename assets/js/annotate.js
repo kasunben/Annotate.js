@@ -1187,11 +1187,13 @@
 
   /**
    * Returns true if the current browser owns the given thread or reply.
-   * Items without an authorId (created before access control) are permanently
-   * read-only — operator can reclaim via SQL if needed.
+   * In offline (single-user) mode — no server sync and no P2P — ownership
+   * is unrestricted: the user can edit/delete any item. In multi-user modes
+   * (server sync or P2P) only the author's own browser can mutate their items.
    */
   function _isOwner(item) {
-    if (!item.authorId) return false; // legacy — no authorId → read-only
+    if (!_syncUrl && !_roomId) return true; // offline — single user, no restrictions
+    if (!item.authorId) return false;       // legacy in multi-user — read-only
     return item.authorId === _authorId;
   }
 
@@ -1558,8 +1560,8 @@
       </div>
       <div class="annotate-settings-group">
         <label class="annotate-settings-label">Data</label>
-        <button class="annotate-settings-btn-danger" id="annotate-clear-btn">Clear my annotations</button>
-        <p class="annotate-settings-hint">Permanently removes your threads and activity for this site.</p>
+        <button class="annotate-settings-btn-danger" id="annotate-clear-btn">${(!_syncUrl && !_roomId) ? 'Clear all annotations' : 'Clear my annotations'}</button>
+        <p class="annotate-settings-hint">${(!_syncUrl && !_roomId) ? 'Permanently removes all threads and activity for this site.' : 'Permanently removes your threads and activity for this site.'}</p>
       </div>
     `;
 
@@ -1574,18 +1576,32 @@
     });
 
     _panelSettings.querySelector('#annotate-clear-btn').addEventListener('click', function () {
-      if (!window.confirm('Delete your annotations and activity for this site? This cannot be undone.')) return;
-      var serverClear = _syncUrl
-        ? Promise.all([
-            fetch(_syncUrl + '/threads?siteId=' + encodeURIComponent(_siteId)
-                          + '&authorId=' + encodeURIComponent(_authorId), { method: 'DELETE' }),
-            fetch(_syncUrl + '/activity?siteId=' + encodeURIComponent(_siteId), { method: 'DELETE' }),
-          ])
-        : Promise.resolve();
-      serverClear
-        .then(function () { return _db ? dbClearMyThreads(_db, _siteId, _authorId) : Promise.resolve(); })
-        .then(function () { window.location.reload(); })
-        .catch(function (e) { console.warn('Annotate.js: clearMyAnnotations failed', e); });
+      var isOffline = !_syncUrl && !_roomId;
+      var msg = isOffline
+        ? 'Delete all annotations and activity for this site? This cannot be undone.'
+        : 'Delete your annotations and activity for this site? This cannot be undone.';
+      if (!window.confirm(msg)) return;
+
+      if (isOffline) {
+        // Single-user offline mode — wipe everything with no restrictions.
+        Promise.resolve()
+          .then(function () { return dbClearAll(_siteId, _db); })
+          .then(function () { window.location.reload(); })
+          .catch(function (e) { console.warn('Annotate.js: clearAll failed', e); });
+      } else {
+        // Multi-user mode — only wipe the current user's own threads.
+        var serverClear = _syncUrl
+          ? Promise.all([
+              fetch(_syncUrl + '/threads?siteId=' + encodeURIComponent(_siteId)
+                            + '&authorId=' + encodeURIComponent(_authorId), { method: 'DELETE' }),
+              fetch(_syncUrl + '/activity?siteId=' + encodeURIComponent(_siteId), { method: 'DELETE' }),
+            ])
+          : Promise.resolve();
+        serverClear
+          .then(function () { return _db ? dbClearMyThreads(_db, _siteId, _authorId) : Promise.resolve(); })
+          .then(function () { window.location.reload(); })
+          .catch(function (e) { console.warn('Annotate.js: clearMyAnnotations failed', e); });
+      }
     });
   }
 
