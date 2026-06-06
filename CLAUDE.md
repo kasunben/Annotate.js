@@ -314,10 +314,10 @@ ActivityEntries are synced to the server when `data-sync-url` is set — all use
 
 | Tab | Shows | Scope |
 |---|---|---|
-| **Threads** | Active threads (`resolved=false, deletedAt=null`) | current pageUrl |
-| **Resolved** | Resolved threads (`resolved=true, deletedAt=null`) | current pageUrl |
-| **Activity** | ActivityEntry list, newest first | current pageUrl |
-| **Settings** | displayName input, clear-data option | global |
+| **Threads** | Active threads (`resolved=false, deletedAt=null`); Edit/Delete on owner cards in multi-user modes (always in offline); Reply open to all | current pageUrl |
+| **Resolved** | Resolved threads (`resolved=true, deletedAt=null`); fully frozen — Edit/Delete/Reply hidden for everyone; **Un-Resolve** button toggles back to active and the card reseeds into the Threads tab | current pageUrl |
+| **Activity** | `ActivityEntry` list, newest first; includes `thread_resolved` and `thread_unresolved` | current pageUrl |
+| **Settings** | **About** (app name, version via esbuild `--define`, sync mode chip, privacy note, GitHub link) · Display name · "Clear all annotations" (offline/BC mode only; hidden in server-sync and P2P) | global |
 
 ---
 
@@ -428,10 +428,25 @@ See `docs/rfc-p2p-sync.md` for full architecture decisions.
 - ✅ **P2 — Cloudflare Worker relay** — `relay/worker.js` + `relay/wrangler.toml`; ephemeral Durable Object room state
 - ✅ **P3 — WebRTC P2P in `annotate.js`** — `data-room-id` activates; `initP2P()` → relay tier → NOSTR fallback; esbuild bundles Trystero
 
+### Phase G — Ownership-based access control ✅
+- ✅ `_authorId` UUID per browser (`localStorage` key `annotate_author_id`); attached to every Thread + Reply
+- ✅ `_isOwner(item)` — unrestricted in offline/BC mode; ownership check in server-sync / P2P
+- ✅ `_renderSavedCard` / `_buildReplyEl` — conditional Edit/Delete menu rendering
+- ✅ Server `checkOwnership` on `POST /threads` upsert — 403 on mismatch; `author_id` column added to SQLite with idempotent `ALTER TABLE` migration
+- ✅ `DELETE /threads?authorId=` scopes deletion; client uses `dbClearMyThreads` in server-sync; settings clear button hidden in server-sync + P2P
+- ✅ `POST /threads` validates `id` / `siteId` / `pageUrl` and returns 400 JSON on missing body (no more 500 HTML crash page on malformed input)
+
+### Phase H — UI polish ✅
+- ✅ **About** group in Settings — app name, build-time injected `_VERSION` (`--define:__ANNOTATE_VERSION__`; falls back to `"dev"` for raw source), sync mode chip via `_syncMode()`, mode-aware privacy note via `_privacyNote()`, GitHub link
+- ✅ Floating comment button `title="Add a comment"`
+- ✅ **Resolved threads frozen** — Edit/Delete/Reply hidden when `thread.resolved` is true; Resolve button rebuilt as **Un-Resolve** open to anyone (toggles `t.resolved`, emits `thread_unresolved` activity)
+- ✅ Un-Resolve reseeds the Threads tab locally (undim existing card or mount fresh via `renderThreadCard`) and on peers (`_rerenderAfterPull` clears dim styles + `is-resolved` mark + re-adds id to `_renderedThreadIds`)
+
 ### Phase F — Future work
-- Authentication / per-user access control
 - User account registration + annotation profile management (Milestone 2)
 - Deploy hosted relay to `wss://relay.annotate-js.workers.dev` (Phase P2 infra, relay code ready)
+- Server enforcement parity for collaborative actions — `checkOwnership` currently blocks non-owner Resolve / Un-Resolve in server-sync mode, so the client-side "anyone can toggle" intent doesn't survive the round-trip; needs a route that accepts only resolve-state mutations from non-owners
+- Re-render the Resolved tab on inbound peer updates while the user is on it (currently only re-renders on tab switch)
 
 ---
 
@@ -446,24 +461,29 @@ Three demo pages available after `npm start`:
 **Note:** The server runs on port 3000. If the port is already in use (common during development when testing stops and the process remains), use `npm run kill-port` to free it, or manually kill the process with `lsof -nP -iTCP:3000 -sTCP:LISTEN` and `kill -9 <PID>`.
 
 Test checklist for any change:
-- Select text → comment button appears, positioned correctly
+- Select text → comment button appears (tooltip "Add a comment"), positioned correctly
 - Add Thread → Highlight appears, ThreadCard created in sidebar
 - Reload page → Threads reload, Highlights re-applied
 - Edit, delete, resolve each work and persist
 - Replies thread correctly, persist across reload
-- Resolved threads appear in Resolved tab, not Threads tab
-- Activity tab shows all events in order
+- Resolved threads appear in Resolved tab, not Threads tab; Edit/Delete/Reply absent on resolved cards
+- **Un-Resolve** from Resolved tab → card disappears from Resolved, reappears active in Threads tab without reload
+- Activity tab shows all events in order; `thread_resolved` and `thread_unresolved` both appear with grey dots
+- Settings → About group shows correct name, version, sync mode chip, privacy note, GitHub link for the current mode
 - Sidebar toggle opens/closes
 - No JS errors in console
 
 **Multi-user sync checklist:**
 - User A annotates → User B sees it within 30 s (or on tab focus)
 - User A resolves → User B's card dims within 30 s
+- User A **un-resolves** → User B's dimming and `.is-resolved` mark are cleared without reload
 - User A deletes → User B's highlight unwraps within 30 s
 - Kill server → User A can still annotate (IDB saves, `dirty=true`)
 - Restart server → User A's offline annotations push on next load (`flushDirtyThreads`)
 - Remove `data-sync-url` → page works exactly as before (no fetch calls, no regressions)
-- Settings → Clear all → sidebar empties immediately, stays empty after reload
+- Settings → "Clear my annotations" (server-sync mode) → only that user's threads disappear; server validates `?authorId=`; **Note:** in current builds the Data/clear section is hidden in server-sync; verify the row stays hidden
+- `curl -X POST /threads` with empty body → 400 JSON `{"error":"id, siteId, and pageUrl are required"}` (not a 500 HTML crash)
+- `curl -X POST /threads` with real existing thread id but wrong `authorId` → 403 `{"error":"forbidden"}`
 
 **BroadcastChannel checklist:**
 - Open `demo.html` in two tabs on the same origin
