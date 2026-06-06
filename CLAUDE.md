@@ -37,7 +37,8 @@ Annotate.js/
     ├── screenshot.png           # UI mockup for README
     ├── philosophy.md            # "Marginal Dialogue" design philosophy behind the mockup
     ├── annotate-js-concept.md  # Phase 1 spec & architecture decisions
-    └── rfc-p2p-sync.md         # P2P sync architecture RFC
+    ├── rfc-p2p-sync.md         # P2P sync architecture RFC
+    └── sync-modes.md           # All four sync modes explained (offline, BC, server, P2P)
 ```
 
 The client distributes as a **single JS file**. The server is optional — omit `data-sync-url` to run offline-only.

@@ -219,7 +219,8 @@ Annotate.js/
 └── docs/
     ├── screenshot.png               
     ├── annotate-js-concept.md       # Phase 1 spec & architecture decisions
-    └── rfc-p2p-sync.md             # P2P architecture RFC
+    ├── rfc-p2p-sync.md             # P2P architecture RFC
+    └── sync-modes.md               # All four sync modes — overview, embed examples, tradeoffs
 ```
 
 ---
