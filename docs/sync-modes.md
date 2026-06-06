@@ -179,12 +179,15 @@ Access control only activates when `data-sync-url` or `data-room-id` is present 
 
 **Resolve** is not ownership-gated in any mode — anyone can resolve a thread (collaborative action by design).
 
-### Settings button — "Clear all" vs "Clear my annotations"
+### Settings — Data section visibility
 
-| Mode | Button label | What it deletes |
+The "Clear all annotations" button is only shown in **offline / BroadcastChannel mode**. It is intentionally hidden in server-sync and P2P modes:
+
+| Mode | Data section | Reason |
 |---|---|---|
-| Offline / BroadcastChannel | **Clear all annotations** | Every thread and all activity for the site |
-| Server sync / P2P | **Clear my annotations** | Only threads owned by the current browser; other users' threads remain |
+| Offline / BroadcastChannel | **"Clear all annotations"** — wipes everything | Single-user; nothing to protect |
+| Server sync | **Hidden** | Per-user clear will be reintroduced once user accounts exist |
+| P2P | **Hidden** | Wiping local IDB while peers are online leaves the room inconsistent |
 
 ### Known limitations (multi-user modes only)
 

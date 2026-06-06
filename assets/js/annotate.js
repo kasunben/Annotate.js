@@ -1551,15 +1551,16 @@
 
   /** Settings tab — display name + clear data */
   function _renderSettingsTab() {
-    // In P2P mode the bulk-clear button is intentionally hidden: wiping all local
-    // state while peers are online would leave the room inconsistent. Users can
-    // still manage individual threads via their own Edit/Delete buttons.
-    var showClearBtn = !_roomId;
+    // Hide the bulk-clear button in P2P and server-sync modes. In P2P, wiping
+    // local state while peers are online leaves the room inconsistent. In
+    // server-sync, per-user clear will be reintroduced once user accounts exist.
+    // Only offline / BroadcastChannel mode (no sync URL, no room) shows it.
+    var showClearBtn = !_roomId && !_syncUrl;
     var clearGroupHtml = showClearBtn ? `
       <div class="annotate-settings-group">
         <label class="annotate-settings-label">Data</label>
-        <button class="annotate-settings-btn-danger" id="annotate-clear-btn">${(!_syncUrl) ? 'Clear all annotations' : 'Clear my annotations'}</button>
-        <p class="annotate-settings-hint">${(!_syncUrl) ? 'Permanently removes all threads and activity for this site.' : 'Permanently removes your threads and activity for this site.'}</p>
+        <button class="annotate-settings-btn-danger" id="annotate-clear-btn">Clear all annotations</button>
+        <p class="annotate-settings-hint">Permanently removes all threads and activity for this site.</p>
       </div>` : '';
     _panelSettings.innerHTML = `
       <div class="annotate-settings-group">
@@ -1584,32 +1585,12 @@
     if (!showClearBtn) return; // no clear button in P2P mode
 
     _panelSettings.querySelector('#annotate-clear-btn').addEventListener('click', function () {
-      var isOffline = !_syncUrl;
-      var msg = isOffline
-        ? 'Delete all annotations and activity for this site? This cannot be undone.'
-        : 'Delete your annotations and activity for this site? This cannot be undone.';
-      if (!window.confirm(msg)) return;
-
-      if (isOffline) {
-        // Single-user offline mode — wipe everything with no restrictions.
-        Promise.resolve()
-          .then(function () { return dbClearAll(_siteId, _db); })
-          .then(function () { window.location.reload(); })
-          .catch(function (e) { console.warn('Annotate.js: clearAll failed', e); });
-      } else {
-        // Server-sync mode — only wipe the current user's own threads.
-        var serverClear = _syncUrl
-          ? Promise.all([
-              fetch(_syncUrl + '/threads?siteId=' + encodeURIComponent(_siteId)
-                            + '&authorId=' + encodeURIComponent(_authorId), { method: 'DELETE' }),
-              fetch(_syncUrl + '/activity?siteId=' + encodeURIComponent(_siteId), { method: 'DELETE' }),
-            ])
-          : Promise.resolve();
-        serverClear
-          .then(function () { return _db ? dbClearMyThreads(_db, _siteId, _authorId) : Promise.resolve(); })
-          .then(function () { window.location.reload(); })
-          .catch(function (e) { console.warn('Annotate.js: clearMyAnnotations failed', e); });
-      }
+      if (!window.confirm('Delete all annotations and activity for this site? This cannot be undone.')) return;
+      // This button only renders in offline/BroadcastChannel mode — wipe everything.
+      Promise.resolve()
+        .then(function () { return dbClearAll(_siteId, _db); })
+        .then(function () { window.location.reload(); })
+        .catch(function (e) { console.warn('Annotate.js: clearAll failed', e); });
     });
   }
 

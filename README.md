@@ -273,7 +273,7 @@ Annotate.js/
 | **Threads** | Active annotations for the current page |
 | **Resolved** | Resolved annotations (read-only) |
 | **Activity** | Shared event feed — all users' creates, replies, edits, resolves, deletes |
-| **Settings** | Display name · "Clear all annotations" (offline/BC mode) or "Clear my annotations" (server sync mode); no clear button in P2P mode |
+| **Settings** | Display name · "Clear all annotations" (offline/BC mode only); hidden in server-sync and P2P modes |
 
 ---
 
@@ -312,7 +312,7 @@ No automated test suite. Three demo pages available after `npm start`:
 - [ ] Replies persist across reload
 - [ ] Resolved tab shows resolved threads
 - [ ] Activity tab shows all events
-- [ ] Settings → "Clear all annotations" (offline) or "Clear my annotations" (server sync) → sidebar empties, stays empty after reload
+- [ ] Settings → "Clear all annotations" (offline only) → sidebar empties, stays empty after reload; button absent in server-sync and P2P modes
 
 **Sync checklist** (use `demo-sync-with-server.html` in two windows):
 - [ ] User A annotates → User B sees it within 30 s (or on tab focus)
