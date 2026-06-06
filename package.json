@@ -1,6 +1,6 @@
 {
   "name": "annotate-server",
-  "version": "0.1.2",
+  "version": "0.2.2",
   "description": "Lightweight backend for Annotate.js — multi-user sync via SQLite",
   "main": "server/index.js",
   "engines": {
