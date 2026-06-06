@@ -160,6 +160,35 @@ All three are **expected and harmless**. P2P works via Tier 3 (NOSTR). The warni
 
 ---
 
+---
+
+## Access control
+
+Annotate.js uses **ownership-based** access control rather than full authentication. A persistent UUID (`annotate_author_id` in `localStorage`) is generated on first load and attached to every Thread and Reply as `authorId`. Edit and Delete buttons are only shown to the browser that created the item.
+
+| Mode | Enforcement | Notes |
+|---|---|---|
+| **Offline** | UI only | Single user; their own threads always editable |
+| **BroadcastChannel** | UI only | Same browser, same localStorage, same `_authorId` — consistent across tabs |
+| **Server sync** | UI + server | `POST /threads` returns 403 on ownership mismatch; `DELETE /threads?authorId=` scopes to own threads |
+| **P2P** | UI only | `authorId` travels with thread objects; each peer enforces via `_isOwner` locally |
+
+**Resolve** is not ownership-gated — anyone can resolve a thread (collaborative action by design).
+
+### Known limitations
+
+1. **localStorage clear = permanent loss of edit access** — no recovery without proper user accounts
+2. **UUID copy = impersonation possible** — requires DevTools access, deliberate effort
+3. **P2P has no server enforcement** — a modified client could spoof `authorId`
+4. **Legacy threads permanently read-only** — threads created before this access control update have `authorId: null`; the server returns 403 for mutations on them. Operator can reclaim ownership via: `UPDATE threads SET author_id = '<uuid>' WHERE author_id IS NULL`
+5. **Activity log not scoped** — "Clear my annotations" wipes all site activity (entries have no `authorId`)
+
+### "Clear my annotations" vs "Clear all"
+
+The settings button says **"Clear my annotations"** — it only removes threads owned by the current browser's `authorId`. Other users' threads remain intact. There is no "Clear all" in the UI (admin-only via direct SQL or the unscoped `DELETE /threads?siteId=` endpoint).
+
+---
+
 ## Choosing a mode
 
 ```

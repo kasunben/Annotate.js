@@ -142,6 +142,28 @@
   }
 
   /**
+   * Delete only threads belonging to a specific author for a site.
+   * Activity entries have no authorId, so activity is cleared entirely (same
+   * scope as before — documented limitation in sync-modes.md).
+   */
+  function dbClearMyThreads(db, siteId, authorId) {
+    return new Promise(function (resolve, reject) {
+      var tx = db.transaction(['threads', 'activity'], 'readwrite');
+      var threadsStore = tx.objectStore('threads');
+      var req = threadsStore.getAll();
+      req.onsuccess = function () {
+        var toDelete = (req.result || []).filter(function (t) {
+          return t.siteId === siteId && t.authorId === authorId;
+        });
+        toDelete.forEach(function (t) { threadsStore.delete(t.id); });
+        tx.objectStore('activity').clear();
+      };
+      tx.oncomplete = resolve;
+      tx.onerror    = function () { reject(tx.error); };
+    });
+  }
+
+  /**
    * Wipe all threads and activity for a site.
    * Prefers clearing the object stores directly when an open IDBDatabase is
    * provided — avoids the deleteDatabase blocking issue caused by the same
@@ -285,6 +307,17 @@
   let   _db       = null; // IDBDatabase — set by init(); null = memory-only mode
   let   _lastSync         = null; // ISO 8601 — max updatedAt seen from server; drives incremental pulls
   let   _lastActivitySync = null; // ISO 8601 — max timestamp seen from server; drives activity incremental pulls
+
+  // ── Author identity ────────────────────────────────────────────────────────
+  // Persistent UUID per browser stored in localStorage. Generated once on
+  // first load; used as ownership proof for Edit/Delete gating. Losing
+  // localStorage (clear, private mode) loses edit access to old threads.
+  const _AUTHOR_ID_KEY = 'annotate_author_id';
+  let _authorId = localStorage.getItem(_AUTHOR_ID_KEY);
+  if (!_authorId) {
+    _authorId = generateId();
+    localStorage.setItem(_AUTHOR_ID_KEY, _authorId);
+  }
 
   // ── P2P state ──────────────────────────────────────────────────────────────
   // Activated by data-room-id. Mutually exclusive with data-sync-url (server sync).
@@ -1152,10 +1185,26 @@
     });
   }
 
-  /** Build a DOM element for one saved reply */
+  /**
+   * Returns true if the current browser owns the given thread or reply.
+   * Items without an authorId (created before access control) are permanently
+   * read-only — operator can reclaim via SQL if needed.
+   */
+  function _isOwner(item) {
+    if (!item.authorId) return false; // legacy — no authorId → read-only
+    return item.authorId === _authorId;
+  }
+
   function _buildReplyEl(reply) {
     const el = document.createElement('div');
     el.className = 'annotate-reply';
+    const replyMenuHtml = _isOwner(reply)
+      ? `<button class="annotate-icon-btn annotate-menu-btn" title="More">${_MENU_SVG}</button>
+              <div class="annotate-dropdown hidden">
+                <button class="annotate-dropdown-item annotate-edit-btn">Edit</button>
+                <button class="annotate-dropdown-item danger annotate-delete-btn">Delete</button>
+              </div>`
+      : '';
     el.innerHTML = `
       <div class="annotate-meta">
         <div class="annotate-avatar annotate-avatar-sm">${_avatarLetter(reply.author)}</div>
@@ -1164,11 +1213,7 @@
             <span class="annotate-author">${reply.author}</span>
             <div class="annotate-author-row-right">
               <span class="annotate-timestamp">${relativeTime(new Date(reply.createdAt))}</span>
-              <button class="annotate-icon-btn annotate-menu-btn" title="More">${_MENU_SVG}</button>
-              <div class="annotate-dropdown hidden">
-                <button class="annotate-dropdown-item annotate-edit-btn">Edit</button>
-                <button class="annotate-dropdown-item danger annotate-delete-btn">Delete</button>
-              </div>
+              ${replyMenuHtml}
             </div>
           </div>
           <p class="annotate-note-text" style="margin-bottom:0;">${reply.body}</p>
@@ -1179,8 +1224,10 @@
   }
 
   /** Wire edit + delete on a reply element; persists changes via card._threadId */
-  function _wireReplyEl(replyEl, replyId, card) {
+  function _wireReplyEl(replyEl, replyId, card, reply) {
     replyEl._replyId = replyId;
+    // Only wire interactive handlers for replies the current user owns.
+    if (!_isOwner(reply)) return;
     const dropdown = replyEl.querySelector('.annotate-dropdown');
     _wireMenuDropdown(replyEl.querySelector('.annotate-menu-btn'), dropdown);
 
@@ -1257,6 +1304,14 @@
   function _renderSavedCard(card, thread) {
     card._lastRenderedAt = thread.updatedAt;
     const cardBody = card.querySelector('.annotate-card-body');
+    const isOwner = _isOwner(thread);
+    const threadMenuHtml = isOwner
+      ? `<button class="annotate-icon-btn annotate-menu-btn" title="More">${_MENU_SVG}</button>
+              <div class="annotate-dropdown hidden">
+                <button class="annotate-dropdown-item annotate-edit-btn">Edit</button>
+                <button class="annotate-dropdown-item danger annotate-delete-btn">Delete</button>
+              </div>`
+      : '';
     cardBody.innerHTML = `
       <div class="annotate-meta">
         <div class="annotate-avatar">${_avatarLetter(thread.author)}</div>
@@ -1265,11 +1320,7 @@
             <span class="annotate-author">${thread.author}</span>
             <div class="annotate-author-row-right">
               <span class="annotate-timestamp">${relativeTime(new Date(thread.createdAt))}</span>
-              <button class="annotate-icon-btn annotate-menu-btn" title="More">${_MENU_SVG}</button>
-              <div class="annotate-dropdown hidden">
-                <button class="annotate-dropdown-item annotate-edit-btn">Edit</button>
-                <button class="annotate-dropdown-item danger annotate-delete-btn">Delete</button>
-              </div>
+              ${threadMenuHtml}
             </div>
           </div>
           <p class="annotate-note-text">${thread.body}</p>
@@ -1281,10 +1332,7 @@
       </div>
     `;
 
-    const dropdown = cardBody.querySelector('.annotate-dropdown');
-    _wireMenuDropdown(cardBody.querySelector('.annotate-menu-btn'), dropdown);
-
-    // Resolve
+    // Resolve — anyone can resolve (collaborative action, not gated by ownership)
     cardBody.querySelector('.annotate-resolve-btn').addEventListener('click', function () {
       if (_db) {
         dbGetThread(_db, thread.id).then(function (t) {
@@ -1301,69 +1349,75 @@
       card.style.pointerEvents = 'none';
     });
 
-    // Edit body
-    cardBody.querySelector('.annotate-edit-btn').addEventListener('click', function () {
-      dropdown.classList.add('hidden');
-      const noteEl      = cardBody.querySelector('.annotate-note-text');
-      const currentText = noteEl.textContent;
+    // Edit + Delete — only wired for the thread owner
+    if (isOwner) {
+      const dropdown = cardBody.querySelector('.annotate-dropdown');
+      _wireMenuDropdown(cardBody.querySelector('.annotate-menu-btn'), dropdown);
 
-      const editor = document.createElement('div');
-      editor.innerHTML = `
-        <textarea class="annotate-card-composer" style="margin-top:8px;">${currentText}</textarea>
-        <div class="annotate-card-actions">
-          <button class="annotate-btn-cancel">Cancel</button>
-          <button class="annotate-btn-save">Save</button>
-        </div>
-      `;
-      noteEl.replaceWith(editor);
-      const ta = editor.querySelector('textarea');
-      ta.focus();
-      ta.setSelectionRange(ta.value.length, ta.value.length);
+      // Edit body
+      cardBody.querySelector('.annotate-edit-btn').addEventListener('click', function () {
+        dropdown.classList.add('hidden');
+        const noteEl      = cardBody.querySelector('.annotate-note-text');
+        const currentText = noteEl.textContent;
 
-      editor.querySelector('.annotate-btn-save').addEventListener('click', function () {
-        const updated = ta.value.trim();
-        if (!updated) return;
+        const editor = document.createElement('div');
+        editor.innerHTML = `
+          <textarea class="annotate-card-composer" style="margin-top:8px;">${currentText}</textarea>
+          <div class="annotate-card-actions">
+            <button class="annotate-btn-cancel">Cancel</button>
+            <button class="annotate-btn-save">Save</button>
+          </div>
+        `;
+        noteEl.replaceWith(editor);
+        const ta = editor.querySelector('textarea');
+        ta.focus();
+        ta.setSelectionRange(ta.value.length, ta.value.length);
+
+        editor.querySelector('.annotate-btn-save').addEventListener('click', function () {
+          const updated = ta.value.trim();
+          if (!updated) return;
+          if (_db) {
+            dbGetThread(_db, thread.id).then(function (t) {
+              if (!t) return;
+              t.body = updated; t.updatedAt = new Date().toISOString(); t.dirty = true;
+              return dbSaveThread(_db, t).then(function () {
+                syncThread(t);
+                return logActivity('thread_edited', t.id, null, t.author, 'edited: \'' + updated.slice(0, 40) + '\'');
+              });
+            }).catch(function (e) { console.warn('Annotate.js: edit persist failed', e); });
+          }
+          const newNote = document.createElement('p');
+          newNote.className = 'annotate-note-text';
+          newNote.textContent = updated;
+          editor.replaceWith(newNote);
+        });
+
+        editor.querySelector('.annotate-btn-cancel').addEventListener('click', function () {
+          const restored = document.createElement('p');
+          restored.className = 'annotate-note-text';
+          restored.textContent = currentText;
+          editor.replaceWith(restored);
+        });
+      });
+
+      // Delete thread
+      cardBody.querySelector('.annotate-delete-btn').addEventListener('click', function () {
         if (_db) {
-          dbGetThread(_db, thread.id).then(function (t) {
-            if (!t) return;
-            t.body = updated; t.updatedAt = new Date().toISOString(); t.dirty = true;
-            return dbSaveThread(_db, t).then(function () {
-              syncThread(t);
-              return logActivity('thread_edited', t.id, null, t.author, 'edited: \'' + updated.slice(0, 40) + '\'');
-            });
-          }).catch(function (e) { console.warn('Annotate.js: edit persist failed', e); });
+          dbDeleteThread(_db, thread.id)
+            .then(function () {
+              dbGetThread(_db, thread.id).then(function (t) { if (t) syncThread(t); });
+              return logActivity('thread_deleted', thread.id, null, getAuthor(), 'deleted thread');
+            })
+            .catch(function (e) { console.warn('Annotate.js: delete persist failed', e); });
         }
-        const newNote = document.createElement('p');
-        newNote.className = 'annotate-note-text';
-        newNote.textContent = updated;
-        editor.replaceWith(newNote);
+        if (card._annotationMark) {
+          const m = card._annotationMark, p = m.parentNode;
+          if (p) { while (m.firstChild) p.insertBefore(m.firstChild, m); p.removeChild(m); }
+        }
+        card.remove();
+        if (!sidebarBody.querySelector('.annotate-card')) emptyMsg.style.display = '';
       });
-
-      editor.querySelector('.annotate-btn-cancel').addEventListener('click', function () {
-        const restored = document.createElement('p');
-        restored.className = 'annotate-note-text';
-        restored.textContent = currentText;
-        editor.replaceWith(restored);
-      });
-    });
-
-    // Delete thread
-    cardBody.querySelector('.annotate-delete-btn').addEventListener('click', function () {
-      if (_db) {
-        dbDeleteThread(_db, thread.id)
-          .then(function () {
-            dbGetThread(_db, thread.id).then(function (t) { if (t) syncThread(t); });
-            return logActivity('thread_deleted', thread.id, null, getAuthor(), 'deleted thread');
-          })
-          .catch(function (e) { console.warn('Annotate.js: delete persist failed', e); });
-      }
-      if (card._annotationMark) {
-        const m = card._annotationMark, p = m.parentNode;
-        if (p) { while (m.firstChild) p.insertBefore(m.firstChild, m); p.removeChild(m); }
-      }
-      card.remove();
-      if (!sidebarBody.querySelector('.annotate-card')) emptyMsg.style.display = '';
-    });
+    } // end isOwner
 
     // Replies — rebuild section (handles both fresh cards and IDB-loaded threads)
     const existing = card.querySelector('.annotate-replies');
@@ -1374,7 +1428,7 @@
 
     (thread.replies || []).filter(function (r) { return !r.deleted; }).forEach(function (r) {
       const el = _buildReplyEl(r);
-      _wireReplyEl(el, r.id, card);
+      _wireReplyEl(el, r.id, card, r);
       replies.appendChild(el);
     });
 
@@ -1504,8 +1558,8 @@
       </div>
       <div class="annotate-settings-group">
         <label class="annotate-settings-label">Data</label>
-        <button class="annotate-settings-btn-danger" id="annotate-clear-btn">Clear all annotations</button>
-        <p class="annotate-settings-hint">Permanently removes all threads and activity for this site.</p>
+        <button class="annotate-settings-btn-danger" id="annotate-clear-btn">Clear my annotations</button>
+        <p class="annotate-settings-hint">Permanently removes your threads and activity for this site.</p>
       </div>
     `;
 
@@ -1520,17 +1574,18 @@
     });
 
     _panelSettings.querySelector('#annotate-clear-btn').addEventListener('click', function () {
-      if (!window.confirm('Delete all annotations and activity for this site? This cannot be undone.')) return;
+      if (!window.confirm('Delete your annotations and activity for this site? This cannot be undone.')) return;
       var serverClear = _syncUrl
         ? Promise.all([
-            fetch(_syncUrl + '/threads?siteId='  + encodeURIComponent(_siteId), { method: 'DELETE' }),
+            fetch(_syncUrl + '/threads?siteId=' + encodeURIComponent(_siteId)
+                          + '&authorId=' + encodeURIComponent(_authorId), { method: 'DELETE' }),
             fetch(_syncUrl + '/activity?siteId=' + encodeURIComponent(_siteId), { method: 'DELETE' }),
           ])
         : Promise.resolve();
       serverClear
-        .then(function () { return dbClearAll(_siteId, _db); })
+        .then(function () { return _db ? dbClearMyThreads(_db, _siteId, _authorId) : Promise.resolve(); })
         .then(function () { window.location.reload(); })
-        .catch(function (e) { console.warn('Annotate.js: clearAll failed', e); });
+        .catch(function (e) { console.warn('Annotate.js: clearMyAnnotations failed', e); });
     });
   }
 
@@ -2088,6 +2143,7 @@
         anchor:     anchor,
         body:       body,
         author:     author,
+        authorId:   _authorId,
         createdAt:  now,
         updatedAt:  now,
         resolved:   false,
@@ -2151,6 +2207,7 @@
         id:        generateId(),
         body:      text,
         author:    author,
+        authorId:  _authorId,
         createdAt: new Date().toISOString(),
         updatedAt: null,
         deleted:   false,
@@ -2170,7 +2227,7 @@
       }
 
       const replyEl = _buildReplyEl(reply);
-      _wireReplyEl(replyEl, reply.id, card);
+      _wireReplyEl(replyEl, reply.id, card, reply);
       replies.insertBefore(replyEl, composerWrap);
       composerWrap.remove();
     });

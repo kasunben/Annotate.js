@@ -7,6 +7,26 @@ const router = express.Router();
 
 const getById = db.prepare('SELECT * FROM threads WHERE id = ?');
 
+/**
+ * Returns true if the upsert is allowed; sends a 403 and returns false otherwise.
+ * Rules:
+ *   - No existing row → new thread, always allowed.
+ *   - Existing row has no author_id → legacy thread, permanently read-only.
+ *   - Existing row's author_id must match the incoming author_id.
+ */
+function checkOwnership(res, existing, incomingAuthorId) {
+  if (!existing) return true;                         // new thread — allow
+  if (!existing.author_id) {
+    res.status(403).json({ error: 'forbidden: legacy thread has no owner' });
+    return false;
+  }
+  if (existing.author_id !== incomingAuthorId) {
+    res.status(403).json({ error: 'forbidden' });
+    return false;
+  }
+  return true;
+}
+
 // GET /threads?siteId=X&pageUrl=Y[&since=ISO8601]
 router.get('/', function (req, res) {
   const { siteId, pageUrl, since } = req.query;
@@ -28,13 +48,15 @@ router.get('/', function (req, res) {
 
 // POST /threads  — upsert (full thread, INSERT OR REPLACE)
 router.post('/', function (req, res) {
-  const row = threadToRow(req.body);
+  const row      = threadToRow(req.body);
+  const existing = getById.get(row.id);
+  if (!checkOwnership(res, existing, row.author_id)) return;
   db.prepare(`
     INSERT OR REPLACE INTO threads
-      (id, site_id, page_url, quote, anchor, body, author,
+      (id, site_id, page_url, quote, anchor, body, author, author_id,
        created_at, updated_at, resolved, resolved_at, resolved_by, replies, deleted_at)
     VALUES
-      (@id, @site_id, @page_url, @quote, @anchor, @body, @author,
+      (@id, @site_id, @page_url, @quote, @anchor, @body, @author, @author_id,
        @created_at, @updated_at, @resolved, @resolved_at, @resolved_by, @replies, @deleted_at)
   `).run(row);
   res.status(201).json(rowToThread(getById.get(row.id)));
@@ -62,11 +84,17 @@ router.patch('/:id/resolve', function (req, res) {
   res.json(rowToThread(row));
 });
 
-// DELETE /threads?siteId=X  — hard-delete all threads for a site (used by Settings → Clear all)
+// DELETE /threads?siteId=X[&authorId=Y]
+// With authorId: deletes only threads owned by that author (used by Settings → Clear my annotations).
+// Without authorId: deletes all threads for the site (admin escape hatch).
 router.delete('/', function (req, res) {
-  const { siteId } = req.query;
+  const { siteId, authorId } = req.query;
   if (!siteId) return res.status(400).json({ error: 'siteId is required' });
-  db.prepare('DELETE FROM threads WHERE site_id = ?').run(siteId);
+  if (authorId) {
+    db.prepare('DELETE FROM threads WHERE site_id = ? AND author_id = ?').run(siteId, authorId);
+  } else {
+    db.prepare('DELETE FROM threads WHERE site_id = ?').run(siteId);
+  }
   res.status(204).end();
 });
 
