@@ -4,6 +4,10 @@ Lightweight inline annotation and threaded comments for any web page — added v
 
 ![Demo screenshot showing highlighted text and comment sidebar](docs/screenshot.png)
 
+> Annotate.js was initially built to solve a specific problem: adding inline comments to a published
+> HTML document — a citizen proposal on child rights — without Google Docs and without a
+> heavy backend. [Read the full story →](docs/origin.md)
+
 ---
 
 ## Features
@@ -16,6 +20,7 @@ Lightweight inline annotation and threaded comments for any web page — added v
 - **Multi-tab sync** — BroadcastChannel keeps tabs on the same origin in sync instantly, zero deps
 - **P2P sync** — optional `data-room-id` activates WebRTC peer-to-peer sync; no server needed; annotation content is DTLS-encrypted end-to-end
 - **Multi-user sync** — optional Node.js + SQLite backend syncs annotations across browsers (30 s poll + tab-focus refresh)
+- **Display name changes propagate retroactively** — renaming yourself in Settings backfills the new name onto all your existing threads and replies and syncs the change to other users immediately
 - **About panel in Settings** — surfaces the build version, active sync mode, and a mode-aware privacy note
 - **Zero runtime dependencies** — one JS file; Trystero bundled at build time
 
@@ -68,7 +73,7 @@ The fallback is automatic — if the relay WebSocket fails to connect within 5 s
         data-site-id="my-site"></script>
 
 <!-- Pin to a specific version (recommended for production) -->
-<script src="https://cdn.jsdelivr.net/gh/kasunben/Annotate.js@v0.3.2/annotate.min.js"
+<script src="https://cdn.jsdelivr.net/gh/kasunben/Annotate.js@v0.3.5/annotate.min.js"
         data-site-id="my-site"></script>
 ```
 
@@ -275,7 +280,7 @@ Annotate.js/
 | **Threads** | Active annotations for the current page |
 | **Resolved** | Resolved annotations. Fully frozen — Edit, Delete, and Reply are hidden for everyone (including the owner). Anyone can click **Un-Resolve** to send the thread back to active, where Edit and Delete become available to the owner again. |
 | **Activity** | Shared event feed — all users' creates, replies, edits, resolves, deletes |
-| **Settings** | Display name · "Clear all annotations" (offline/BC mode only) · About (app name, version, active sync mode, mode-aware privacy note, GitHub link) |
+| **Settings** | Display name (changes backfill all your existing threads and replies and sync to peers) · "Clear all annotations" (offline/BC mode only) · About (app name, version, active sync mode, mode-aware privacy note, GitHub link) |
 
 ---
 
@@ -320,6 +325,7 @@ No automated test suite. Three demo pages available after `npm start`:
 - [ ] **Un-Resolve** from Resolved tab → card disappears from Resolved and reappears in Threads (active state, owner gets Edit/Delete back) without reload
 - [ ] Activity tab shows all events including `thread_resolved` / `thread_unresolved`
 - [ ] Settings → About shows correct name, version, sync mode chip, and privacy note for the current mode
+- [ ] Settings → change display name → all existing cards and replies by that author update to the new name immediately (no reload); in server-sync / P2P modes other users see the updated name within 30 s / on next P2P broadcast
 - [ ] Settings → "Clear all annotations" (offline only) → sidebar empties, stays empty after reload; button absent in server-sync and P2P modes
 
 **Access control checklist** (server-sync or P2P, two browser profiles):
@@ -464,3 +470,4 @@ Point `src` at your deployed server and you're done:
 - [x] Frozen Resolved tab — Edit / Delete / Reply hidden on resolved threads; **Un-Resolve** toggle open to anyone, reseeds the Threads tab locally and across peers without reload
 - [x] About panel in Settings — app name, version (injected at build time from `package.json`), sync mode chip, mode-aware privacy note, GitHub link
 - [x] Tooltip on the floating comment button
+- [x] Display name rename propagation — `_renameAuthorEverywhere` backfills new name onto all owned threads/replies in IDB, syncs via active mode
