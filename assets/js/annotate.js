@@ -373,11 +373,11 @@
   style.textContent = `
     /* ===================== SIDEBAR ===================== */
     #annotate-sidebar {
-      position: absolute;
+      position: fixed;
       top: 0;
       right: 0;
       width: 360px;
-      min-height: 100%;
+      height: 100vh;
       background: #f4f5f7;
       border-left: 1px solid #e0e4ea;
       box-shadow: -2px 0 16px rgba(0,0,0,0.07);
@@ -1064,6 +1064,18 @@
   // threadId → <mark> element; used by Resolved tab delete to remove highlight
   const _threadMarks      = {};
   const _renderedThreadIds = new Set(); // IDs of active thread cards currently in sidebarBody
+
+  // ── Scroll sync ───────────────────────────────────────────────────────────
+  // The sidebar is position:fixed so it always stays in the viewport.
+  // Cards inside sidebarBody use absolute top values in document space
+  // (card._anchorTop = mark_docY - headerH).  Applying translateY(-scrollY)
+  // to the body container keeps each card visually aligned with its highlight
+  // as the user scrolls the page.
+  function _syncBodyTranslate() {
+    sidebarBody.style.transform = 'translateY(' + (-window.scrollY) + 'px)';
+  }
+  window.addEventListener('scroll', _syncBodyTranslate, { passive: true });
+  _syncBodyTranslate();
 
   // --- Tab switching ---
   const _allPanels   = [sidebarBody, _panelResolved, _panelActivity, _panelSettings];
