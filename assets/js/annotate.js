@@ -962,7 +962,6 @@
       font-variant-numeric: tabular-nums;
     }
     .annotate-mode-chip {
-      margin-left: auto;
       font-size: 11px;
       font-weight: 500;
       padding: 2px 8px;
