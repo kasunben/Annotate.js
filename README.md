@@ -14,6 +14,7 @@ Lightweight inline annotation and threaded comments for any web page — added v
 ## Features
 
 - **Select any text** → floating button → add a comment
+- **Click any highlight** → sidebar opens, page scrolls to the mark, matching card pulses amber so the eye lands on the right thread instantly
 - **Threaded replies** on every annotation
 - **Resolve / Un-Resolve** — resolved threads are frozen (no Edit / Delete / Reply); anyone can revert one back to active
 - **Ownership-based access control** — in multi-user modes, each browser only edits or deletes its own threads and replies; Resolve is collaborative; offline mode is unrestricted
