@@ -271,7 +271,7 @@ Annotate.js/
 | Tab | Content |
 |-----|---------|
 | **Threads** | Active annotations for the current page |
-| **Resolved** | Resolved annotations. Frozen state: Delete and Reply hidden for everyone; Edit retained for owner; anyone can click **Un-Resolve** to send it back to Threads. |
+| **Resolved** | Resolved annotations. Fully frozen — Edit, Delete, and Reply are hidden for everyone (including the owner). Anyone can click **Un-Resolve** to send the thread back to active, where Edit and Delete become available to the owner again. |
 | **Activity** | Shared event feed — all users' creates, replies, edits, resolves, deletes |
 | **Settings** | Display name · "Clear all annotations" (offline/BC mode only) · About (app name, version, active sync mode, mode-aware privacy note, GitHub link) |
 

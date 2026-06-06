@@ -1366,21 +1366,17 @@
     card._lastRenderedAt = thread.updatedAt;
     const cardBody = card.querySelector('.annotate-card-body');
     const isOwner = _isOwner(thread);
-    // Resolved threads are frozen: Delete is hidden for everyone (so the
-    // record cannot be wiped), Reply is hidden (the conversation is closed),
-    // and the Resolve button becomes Un-Resolve. Edit stays available to the
-    // owner so they can still correct text on a resolved record.
-    var menuItemsHtml = '';
-    if (isOwner) {
-      menuItemsHtml += '<button class="annotate-dropdown-item annotate-edit-btn">Edit</button>';
-      if (!thread.resolved) {
-        menuItemsHtml += '<button class="annotate-dropdown-item danger annotate-delete-btn">Delete</button>';
-      }
-    }
-    const threadMenuHtml = isOwner
+    // Resolved threads are frozen: Edit AND Delete are hidden for everyone
+    // (including the owner) so the record cannot be modified or wiped. Reply
+    // is hidden (the conversation is closed). The Resolve button becomes
+    // Un-Resolve, open to anyone — sending the thread back to active makes
+    // Edit and Delete available again.
+    const canModify = isOwner && !thread.resolved;
+    const threadMenuHtml = canModify
       ? `<button class="annotate-icon-btn annotate-menu-btn" title="More">${_MENU_SVG}</button>
               <div class="annotate-dropdown hidden">
-                ${menuItemsHtml}
+                <button class="annotate-dropdown-item annotate-edit-btn">Edit</button>
+                <button class="annotate-dropdown-item danger annotate-delete-btn">Delete</button>
               </div>`
       : '';
     cardBody.innerHTML = `
@@ -1433,8 +1429,10 @@
       card.style.pointerEvents = 'none';
     });
 
-    // Edit + Delete — only wired for the thread owner
-    if (isOwner) {
+    // Edit + Delete — only wired for the thread owner on non-resolved threads.
+    // The menu HTML itself is not rendered when canModify is false, so the
+    // querySelectors below would return null without this guard.
+    if (canModify) {
       const dropdown = cardBody.querySelector('.annotate-dropdown');
       _wireMenuDropdown(cardBody.querySelector('.annotate-menu-btn'), dropdown);
 
@@ -1501,7 +1499,7 @@
         card.remove();
         if (!sidebarBody.querySelector('.annotate-card')) emptyMsg.style.display = '';
       });
-    } // end isOwner
+    } // end canModify
 
     // Replies — rebuild section (handles both fresh cards and IDB-loaded threads)
     const existing = card.querySelector('.annotate-replies');
