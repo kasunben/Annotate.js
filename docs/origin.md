@@ -28,5 +28,4 @@ I hope what started as a solution for a single citizen proposal grows into somet
 
 May it be useful.
 
-kasunben 
-June 6, 2026
+kasunben · June 6, 2026
