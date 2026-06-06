@@ -12,8 +12,10 @@ Lightweight inline annotation and threaded comments for any web page — added v
 - **Threaded replies** on every annotation
 - **Resolve** threads when addressed
 - **Offline-first** — works with no server; annotations persist in IndexedDB
-- **Multi-user sync** — optional Node.js + SQLite backend syncs annotations across browsers in near-real-time (30 s poll + tab-focus refresh)
-- **Zero dependencies, zero build step** — one JS file, drop it in and go
+- **Multi-tab sync** — BroadcastChannel keeps tabs on the same origin in sync instantly, zero deps
+- **P2P sync** — optional `data-room-id` activates WebRTC peer-to-peer sync; no server needed; annotation content is DTLS-encrypted end-to-end
+- **Multi-user sync** — optional Node.js + SQLite backend syncs annotations across browsers (30 s poll + tab-focus refresh)
+- **Zero runtime dependencies** — one JS file; Trystero bundled at build time
 
 ---
 
@@ -65,7 +67,55 @@ To test multi-user sync, open the second URL in two browser windows and annotate
 
 ---
 
-## How it works
+## P2P sync (no server required)
+
+Add `data-room-id` to the script tag instead of `data-sync-url`:
+
+```html
+<script
+  src="annotate.min.js"
+  data-site-id="my-site"
+  data-room-id="f3a9c271-8d4e-4b1a-9c3f-d17b2e5a08cc">
+</script>
+```
+
+**Use a long random UUID** — it's the shared secret. Anyone who knows the room ID on the same `pageUrl` can read and write all annotations.
+
+### How P2P sync works
+
+```
+Browser A                  Relay (signaling only)          Browser B
+────────────────────────────────────────────────────────────────────────
+ joinRoom(roomId) ─────── WebSocket handshake ──────────── joinRoom(roomId)
+                            (only room name visible)
+                  ◄──────── DTLS-encrypted WebRTC ────────►
+  User A adds thread
+    → save to IDB
+    → broadcastThread() ──────────────────────────────────► onPeerThread()
+                                                              → merge by updatedAt
+                                                              → save to IDB
+                                                              → re-render card
+```
+
+- Annotation content **never** passes through the relay — only the WebRTC handshake (SDP + ICE)
+- Three-tier signaling: hosted relay (default) → self-hosted relay (`data-relay-url`) → NOSTR (automatic fallback)
+- Last-write-wins by `updatedAt` — same conflict model as server sync
+
+### Tradeoffs vs server sync
+
+| | Server sync | P2P |
+|---|---|---|
+| Persistence | SQLite — survives all browsers closing | IDB only — latecomers see peer state when a peer is online |
+| Privacy | Annotations on your server | Annotation content never leaves the browser |
+| Hosting cost | VPS / container | Zero (annotation data); relay is a free Cloudflare Workers app |
+| Offline writes | `dirty` flag, flushed on reconnect | Broadcast when a peer comes online |
+| Activity history | Server-persisted | Broadcast only — latecomers miss offline events |
+
+P2P is ideal for **live collaborative review sessions**. For async annotation over days, server sync provides better durability.
+
+---
+
+## How server sync works
 
 ```
 Browser A                          Server                      Browser B
@@ -91,11 +141,15 @@ Select text → add comment
 ```
 Annotate.js/
 ├── assets/
-│   ├── js/annotate.js               # Client library source — single IIFE
-│   └── annotate.min.js              # Production build (gitignored — run npm run build)
+│   └── js/annotate.js               # Client library source — single IIFE (+ Trystero import)
+├── annotate.min.js                  # Production build — esbuild bundles Trystero; run npm run build
 ├── demo/
-│   ├── demo.html                    # Offline-only test page (no data-sync-url)
-│   └── demo-sync-with-server.html   # Multi-user sync test page (data-sync-url set)
+│   ├── demo.html                    # Offline-only test page
+│   ├── demo-sync-with-server.html   # Multi-user sync test page (data-sync-url set)
+│   └── demo-p2p.html                # P2P test page (data-room-id set, no server needed)
+├── relay/
+│   ├── worker.js                    # Cloudflare Worker + Durable Object WebSocket relay
+│   └── wrangler.toml                # Wrangler deploy config
 ├── server/
 │   ├── index.js                     # Express entry point; also serves static files
 │   ├── db.js                        # SQLite schema + rowToThread/threadToRow helpers
@@ -109,7 +163,8 @@ Annotate.js/
 ├── package.json
 └── docs/
     ├── screenshot.png               
-    └── annotate-js-concept.md       # Phase 1 spec & architecture decisions
+    ├── annotate-js-concept.md       # Phase 1 spec & architecture decisions
+    └── rfc-p2p-sync.md             # P2P architecture RFC
 ```
 
 ---
@@ -118,7 +173,7 @@ Annotate.js/
 
 | Script | Description |
 |--------|-------------|
-| `npm run build` | Minify `assets/js/annotate.js` → `annotate.min.js` |
+| `npm run build` | Bundle + minify via esbuild → `annotate.min.js` (Trystero bundled in) |
 | `npm start` | Start the server on port 3000 |
 | `npm run kill-port` | Free port 3000 if already in use |
 | `npm run pm2:start` | Start with PM2 (requires `npm i -g pm2`) |
@@ -177,12 +232,13 @@ Thread {
 
 ## Testing
 
-No automated test suite. Two demo pages available after `npm start`:
+No automated test suite. Three demo pages available after `npm start`:
 
 | Page | URL | Use for |
 |------|-----|---------|
 | Offline | `http://localhost:3000/demo/demo.html` | IDB-only testing, no server needed |
 | Sync | `http://localhost:3000/demo/demo-sync-with-server.html` | Multi-user sync — open in two windows |
+| P2P | `http://localhost:3000/demo/demo-p2p.html` | P2P sync — open in two browsers or incognito windows |
 
 **Core checklist** (use either demo page):
 - [ ] Select text → comment button appears
@@ -287,6 +343,6 @@ Point `src` at your deployed server and you're done:
 
 ## Roadmap
 
+- [ ] Deploy hosted relay to `wss://relay.annotate-js.workers.dev` (relay code in `relay/` is ready)
 - [ ] Authentication / per-user access control
-- [ ] Real-time push (SSE or WebSocket) to replace polling
 - [ ] User account registration + annotation profile management (Milestone 2)
