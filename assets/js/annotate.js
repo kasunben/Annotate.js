@@ -1417,6 +1417,24 @@
           t.dirty = true;
           return dbSaveThread(_db, t).then(function () {
             syncThread(t);
+            // When un-resolving from the Resolved tab, the Threads tab will be
+            // out of sync until reload: either the original card is still there
+            // but dimmed from the prior Resolve click, or it was filtered out by
+            // loadThreads on the last page load. Restore it now so the user sees
+            // it as soon as they switch back to Threads.
+            if (isUnresolve) {
+              var mark = _threadMarks[t.id] || null;
+              if (mark) mark.classList.remove('is-resolved');
+              var threadsCard = sidebarBody.querySelector('[data-thread-id="' + t.id + '"]');
+              if (threadsCard) {
+                threadsCard.style.opacity = '';
+                threadsCard.style.pointerEvents = '';
+                _renderSavedCard(threadsCard, t);
+                repositionCards();
+              } else {
+                renderThreadCard(t, mark);
+              }
+            }
             return logActivity(
               isUnresolve ? 'thread_unresolved' : 'thread_resolved',
               t.id, null, who,
