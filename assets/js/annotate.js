@@ -331,6 +331,9 @@
   // No-ops replaced by initP2P() when a room is active.
   let _p2pBroadcastThread   = function () {};
   let _p2pBroadcastActivity = function () {};
+  // Batch peer/BC updates — flushed in createdAt order after a 50 ms settle window.
+  var _pendingPeerBatch = {};   // id → thread (last-write-wins within the window)
+  var _pendingPeerTimer = null; // setTimeout handle for the flush
 
   console.log('Annotate.js loaded — site:', _siteId);
 
@@ -354,7 +357,7 @@
           // existing one for new threads; >= correctly triggers a re-render.
           if (!existing || msg.thread.updatedAt >= existing.updatedAt) {
             dbSaveThread(_db, msg.thread).then(function () {
-              _rerenderAfterPull([msg.thread]);
+              _batchRenderAfterPull(msg.thread);
             });
           }
         });
@@ -920,6 +923,22 @@
       color: #9ca3af;
       margin-top: 5px;
     }
+
+    .annotate-settings-btn {
+      width: 100%;
+      padding: 8px 12px;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      background: #f9fafb;
+      color: #374151;
+      font-size: 13px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      cursor: pointer;
+      text-align: left;
+      margin-bottom: 6px;
+      transition: background 0.15s;
+    }
+    .annotate-settings-btn:hover { background: #f3f4f6; }
 
     .annotate-settings-btn-danger {
       background: none;
@@ -1628,6 +1647,7 @@
 
   /** Activity tab — chronological event feed */
   function _activityDotColor(type) {
+    if (type.startsWith('data_'))  return '#2563eb';
     if (type.includes('deleted'))  return '#dc2626';
     if (type.includes('edited'))   return '#d97706';
     if (type.includes('resolved')) return '#6b7280';
@@ -1701,6 +1721,157 @@
     tx.onerror = function () { console.warn('Annotate.js: _renameAuthorEverywhere failed', tx.error); };
   }
 
+  /** Download all threads + activity + settings for the current page as a JSON file. */
+  function _exportData() {
+    if (!_db) return;
+    Promise.all([
+      _dbGetByPage(_db, _pageUrl),
+      dbGetActivity(_db, _pageUrl),
+    ]).then(function (results) {
+      var payload = {
+        version:    '1',
+        exportedAt: new Date().toISOString(),
+        siteId:     _siteId,
+        pageUrl:    _pageUrl,
+        settings: {
+          displayName: getAuthor(),
+          authorId:    _authorId,
+        },
+        threads:  results[0],
+        activity: results[1],
+      };
+      var blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      var url  = URL.createObjectURL(blob);
+      var a    = document.createElement('a');
+      a.href     = url;
+      a.download = 'annotate-' + _siteId + '-' + new Date().toISOString().slice(0, 10) + '.json';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      var n = results[0].length;
+      logActivity('data_exported', null, null, getAuthor(),
+        'exported ' + n + (n === 1 ? ' thread' : ' threads'));
+    }).catch(function (e) { console.warn('Annotate.js: export failed', e); });
+  }
+
+  /**
+   * Merge-import an Annotate.js JSON export file into the current page.
+   * - Threads: last-write-wins by updatedAt (skips if existing is newer).
+   * - Activity: idempotent put (entries are immutable; same id = same content).
+   * - Settings: overwrite displayName + authorId if present in the file.
+   * - After commit: syncThread for each written thread (BC / P2P / server propagation).
+   */
+  function _importData(file) {
+    if (!_db) return;
+    var reader = new FileReader();
+    reader.onload = function (e) {
+      var payload;
+      try { payload = JSON.parse(e.target.result); }
+      catch (_) { alert('Annotate.js: could not parse the file — is it a valid JSON export?'); return; }
+
+      if (!payload.threads || !Array.isArray(payload.threads)) {
+        alert('Annotate.js: unrecognised export format.'); return;
+      }
+      if (payload.pageUrl && payload.pageUrl !== _pageUrl) {
+        if (!window.confirm(
+          'This export is from a different page:\n' + payload.pageUrl +
+          '\n\nHighlights may not resolve on this page. Import anyway?'
+        )) return;
+      }
+
+      var toSync        = [];
+      var restoredCount = 0; // threads restored from deletion during this import
+      var importedAt    = new Date().toISOString(); // single timestamp for the whole batch
+
+      var tx          = _db.transaction(['threads', 'activity'], 'readwrite');
+      var threadStore = tx.objectStore('threads');
+      var actStore    = tx.objectStore('activity');
+
+      tx.oncomplete = function () {
+        // Propagate to BC, P2P peers, and server
+        toSync.forEach(function (t) { syncThread(t); });
+
+        // Restore settings
+        var s = payload.settings;
+        if (s) {
+          var oldName = getAuthor();
+          if (s.displayName) localStorage.setItem(_AUTHOR_KEY, s.displayName);
+          if (s.authorId)    { localStorage.setItem(_AUTHOR_ID_KEY, s.authorId); _authorId = s.authorId; }
+          if (s.displayName && s.displayName !== oldName) _renameAuthorEverywhere(s.displayName);
+        }
+
+        // Re-render new / updated non-deleted cards
+        if (toSync.length === 0) {
+          // Nothing was newer than what's already in IDB — let the user know.
+          alert('Import complete — all threads are already up to date.');
+        } else {
+          // Switch to Threads tab BEFORE rendering so sidebarBody is visible.
+          // card.offsetHeight returns 0 for elements in hidden containers, which
+          // causes repositionCards() to compute wrong floor values and leaves all
+          // cards stacked at the top (or invisible) until ResizeObserver corrects.
+          _switchTab('Threads');
+
+          // Apply active (non-deleted) threads sorted oldest-first.
+          // Mark application changes DOM structure (splits text nodes); anchors for
+          // later threads were serialised after earlier marks existed, so XPath
+          // resolution is only correct when marks are restored in createdAt order.
+          var active = toSync.filter(function (t) { return !t.deletedAt; });
+          active.sort(function (a, b) { return a.createdAt < b.createdAt ? -1 : 1; });
+          if (active.length) _rerenderAfterPull(active);
+
+          // One extra reposition pass after the browser has laid out the new cards.
+          requestAnimationFrame(repositionCards);
+
+          // Log the import action
+          var n    = toSync.length;
+          var snap = 'imported ' + n + (n === 1 ? ' thread' : ' threads');
+          if (restoredCount > 0) snap += ' (' + restoredCount + ' restored)';
+          logActivity('data_imported', null, null, getAuthor(), snap);
+        }
+      };
+
+      tx.onerror = function () { console.warn('Annotate.js: import transaction failed', tx.error); };
+
+      // One getAll() builds the existence map; all puts then happen synchronously
+      // inside the same transaction so it stays open until we're done.
+      var getAllReq = threadStore.getAll();
+      getAllReq.onsuccess = function () {
+        // Store the full record so we can check deletedAt, not just updatedAt.
+        var existingMap = {};
+        (getAllReq.result || []).forEach(function (t) { existingMap[t.id] = t; });
+
+        payload.threads.forEach(function (t) {
+          var existing = existingMap[t.id];
+          var isRestore = !!(existing && existing.deletedAt && !t.deletedAt);
+          var shouldImport = !existing                  // new thread
+            || t.updatedAt > existing.updatedAt         // imported is genuinely newer
+            || isRestore;                               // restore: existing deleted, exported was not
+          if (shouldImport) {
+            if (isRestore) restoredCount++;
+            // Stamp every imported thread with the import batch timestamp so that:
+            //   (1) restored threads beat stale deleted copies on peer IDBs and
+            //       BC / P2P updatedAt comparisons (which use >= or >)
+            //   (2) ALL imported threads appear in incremental server pulls
+            //       (?since=_lastSync) — the server query is
+            //       WHERE updated_at > _lastSync; threads with old original
+            //       updatedAt values would be invisible to every incremental pull
+            //       on connected peers, making them only discoverable on page reload
+            t = Object.assign({}, t, { updatedAt: importedAt });
+            t.dirty = !!_syncUrl; // mark for server push in sync mode
+            threadStore.put(t);
+            toSync.push(t);
+          }
+        });
+
+        (payload.activity || []).forEach(function (entry) {
+          actStore.put(entry); // idempotent: same id = same immutable content
+        });
+      };
+    };
+    reader.readAsText(file);
+  }
+
   /** Settings tab — display name + clear data */
   function _renderSettingsTab() {
     // Hide the bulk-clear button in P2P and server-sync modes. In P2P, wiping
@@ -1728,6 +1899,15 @@
         <a class="annotate-about-link" href="https://github.com/kasunben/Annotate.js"
            target="_blank" rel="noopener">View on GitHub</a>
       </div>`;
+    var exportImportHtml = `
+      <div class="annotate-settings-group">
+        <label class="annotate-settings-label">Export / Import</label>
+        <button class="annotate-settings-btn" id="annotate-export-btn">Download annotations</button>
+        <p class="annotate-settings-hint">Saves all threads, activity, and settings for this page as a JSON file.</p>
+        <input type="file" id="annotate-import-file" accept=".json" style="display:none">
+        <button class="annotate-settings-btn" id="annotate-import-btn">Import from file…</button>
+        <p class="annotate-settings-hint">Merges threads and activity from a JSON export. Settings in the file override current settings. Importing another user's export grants you edit access to their threads.</p>
+      </div>`;
     _panelSettings.innerHTML = `
       ${aboutHtml}
       <div class="annotate-settings-group">
@@ -1736,6 +1916,7 @@
                value="${getAuthor()}" placeholder="Enter your name…" />
         <p class="annotate-settings-hint">Shown on all your annotations and replies.</p>
       </div>
+      ${exportImportHtml}
       ${clearGroupHtml}
     `;
 
@@ -1752,6 +1933,19 @@
     nameInput.addEventListener('blur', _saveName);
     nameInput.addEventListener('keydown', function (e) {
       if (e.key === 'Enter') { _saveName(); nameInput.blur(); }
+    });
+
+    // Export / Import wiring (always present)
+    _panelSettings.querySelector('#annotate-export-btn').addEventListener('click', _exportData);
+    const importFileInput = _panelSettings.querySelector('#annotate-import-file');
+    _panelSettings.querySelector('#annotate-import-btn').addEventListener('click', function () {
+      importFileInput.click();
+    });
+    importFileInput.addEventListener('change', function () {
+      if (importFileInput.files[0]) {
+        _importData(importFileInput.files[0]);
+        importFileInput.value = ''; // reset so the same file can be re-imported
+      }
     });
 
     if (!showClearBtn) return; // no clear button in server-sync or P2P modes
@@ -1858,7 +2052,7 @@
     dbGetThread(_db, incoming.id).then(function (existing) {
       if (!existing || incoming.updatedAt > existing.updatedAt) {
         dbSaveThread(_db, incoming).then(function () {
-          _rerenderAfterPull([incoming]);
+          _batchRenderAfterPull(incoming);
         });
       }
     });
@@ -1890,6 +2084,9 @@
       }
       if (msg.type === 'STATE_SNAPSHOT') {
         var all = msg.threads || [];
+        // Sort oldest-first so that when marks are applied they match the DOM
+        // state in which each thread's XPath anchor was originally serialised.
+        all.sort(function (a, b) { return a.createdAt < b.createdAt ? -1 : 1; });
         var chain = Promise.resolve();
         all.forEach(function (t) {
           chain = chain.then(function () {
@@ -1898,7 +2095,10 @@
             });
           });
         });
-        chain.then(function () { _rerenderAfterPull(all); });
+        chain.then(function () {
+          _rerenderAfterPull(all);
+          requestAnimationFrame(repositionCards);
+        });
       }
     };
   }
@@ -2207,6 +2407,38 @@
   }
 
   /**
+   * Collect peer/BC thread updates into a 50 ms batch, then call
+   * _rerenderAfterPull with all collected threads sorted by createdAt.
+   *
+   * Why createdAt order matters: applying a mark to a text node splits that
+   * node. Anchors for threads created AFTER an earlier mark was already in the
+   * DOM were serialised against the post-split DOM. Restoring them only works
+   * correctly when earlier marks are applied first — the same order they were
+   * originally created. Out-of-order mark application causes XPath to resolve
+   * to the wrong text node, placing cards at the wrong page position (they
+   * look correct after a reload because loadThreads always uses createdAt order).
+   */
+  function _batchRenderAfterPull(thread) {
+    // Deduplicate: keep the latest version of each thread within the window.
+    var cur = _pendingPeerBatch[thread.id];
+    if (!cur || thread.updatedAt >= cur.updatedAt) {
+      _pendingPeerBatch[thread.id] = thread;
+    }
+    // One flush per batch — already scheduled if the timer is running.
+    if (_pendingPeerTimer) return;
+    _pendingPeerTimer = setTimeout(function () {
+      var batch = Object.keys(_pendingPeerBatch).map(function (k) {
+        return _pendingPeerBatch[k];
+      });
+      _pendingPeerBatch = {};
+      _pendingPeerTimer = null;
+      batch.sort(function (a, b) { return a.createdAt < b.createdAt ? -1 : 1; });
+      _rerenderAfterPull(batch);
+      requestAnimationFrame(repositionCards);
+    }, 50);
+  }
+
+  /**
    * Fetch threads updated since _lastSync from the server, merge into IDB,
    * and update the DOM delta. Runs on load, on tab focus, and every 30 s.
    */
@@ -2222,14 +2454,20 @@
       serverThreads.forEach(function (st) {
         if (!_lastSync || st.updatedAt > _lastSync) _lastSync = st.updatedAt;
       });
-      // Merge into IDB: server wins unless local record is dirty (pending push)
+      // Merge into IDB: server wins unless local record is dirty (pending push).
+      // Track dirty ids so we can exclude them from _rerenderAfterPull — without
+      // this guard a stale server-side deleted version would remove a card that
+      // is still pending a successful push (e.g., a just-restored import).
+      var dirtyIds = new Set();
       return Promise.all(serverThreads.map(function (st) {
         return dbGetThread(_db, st.id).then(function (local) {
-          if (local && local.dirty) return; // local mutation not yet pushed — skip
+          if (local && local.dirty) { dirtyIds.add(st.id); return; } // pending push — skip
           st.dirty = false;
           return dbSaveThread(_db, st);
         });
-      })).then(function () { _rerenderAfterPull(serverThreads); });
+      })).then(function () {
+        _rerenderAfterPull(serverThreads.filter(function (st) { return !dirtyIds.has(st.id); }));
+      });
     })
     .catch(function (e) { console.warn('Annotate.js: pullThreads failed', e); });
   }
