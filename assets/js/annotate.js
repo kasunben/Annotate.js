@@ -496,6 +496,17 @@
       box-shadow: 0 1px 4px rgba(0,0,0,0.06);
     }
 
+    @keyframes annotate-focus-ring {
+      0%   { box-shadow: 0 0 0 0   rgba(245,158,11,0.55), 0 1px 4px rgba(0,0,0,0.06); }
+      40%  { box-shadow: 0 0 0 5px rgba(245,158,11,0.18), 0 1px 4px rgba(0,0,0,0.06); }
+      100% { box-shadow: 0 0 0 0   rgba(245,158,11,0),    0 1px 4px rgba(0,0,0,0.06); }
+    }
+
+    .annotate-card-focused {
+      border-color: #f59e0b;
+      animation: annotate-focus-ring 1.1s ease forwards;
+    }
+
     /* ===================== QUOTE ===================== */
     .annotate-card-quote {
       background: #fdf8f0;
@@ -1211,6 +1222,27 @@
     return top;
   }
 
+  // Focus the sidebar card that belongs to a given thread and scroll the page
+  // so the highlight is centred in the viewport.
+  // For resolved threads, switch to the Resolved tab (no card to pulse there).
+  function _focusCard(threadId) {
+    var mark = _threadMarks[threadId];
+    if (mark && mark.classList.contains('is-resolved')) {
+      _switchTab('Resolved');
+      return;
+    }
+    _switchTab('Threads');
+    var card = sidebarBody.querySelector('[data-thread-id="' + threadId + '"]');
+    // Scroll the page so the highlight (and therefore the card) centres in viewport.
+    if (mark) mark.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (!card) return;
+    // Pulse the card border to draw the eye.
+    card.classList.remove('annotate-card-focused');
+    void card.offsetWidth; // force reflow so the animation restarts cleanly
+    card.classList.add('annotate-card-focused');
+    setTimeout(function () { card.classList.remove('annotate-card-focused'); }, 1200);
+  }
+
   // --- Re-position all cards based on their anchors ---
   // Each card stores _anchorTop — the ideal vertical position aligned with its highlight.
   // Cards are sorted by anchor, then placed greedily: each card sits at its anchor or
@@ -1632,7 +1664,8 @@
     if (mark) {
       card._annotationMark = mark;
       _threadMarks[thread.id] = mark;
-      mark.addEventListener('click', function () { openSidebar(); });
+      mark._threadId = thread.id;
+      mark.addEventListener('click', function () { openSidebar(); _focusCard(thread.id); });
     }
 
     const headerHeight = document.getElementById('annotate-sidebar-header').offsetHeight;
@@ -2546,6 +2579,7 @@
         const mark  = range ? highlightRange(range) : null;
         if (mark) {
           mark.classList.add('is-resolved');
+          mark._threadId = thread.id;
           mark.addEventListener('click', function () {
             openSidebar();
             _switchTab('Resolved');
@@ -2634,6 +2668,7 @@
       card._threadId = thread.id;
       card.dataset.threadId = thread.id;
       _renderedThreadIds.add(thread.id);
+      if (mark) { mark._threadId = thread.id; _threadMarks[thread.id] = mark; }
 
       if (_db) {
         dbSaveThread(_db, thread)
@@ -2730,9 +2765,12 @@
   document.addEventListener('mouseup', function (e) {
     if (sidebar.contains(e.target) || commentBtn.contains(e.target)) return;
 
-    // If clicking on highlighted text, open the sidebar instead
+    // If clicking on highlighted text, open the sidebar and focus the card
     if (e.target.closest('.annotate-highlight')) {
       openSidebar();
+      var clickedMark = e.target.closest('.annotate-highlight');
+      var tid = clickedMark._threadId;
+      if (tid) _focusCard(tid);
       return;
     }
 
