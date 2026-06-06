@@ -823,6 +823,10 @@
 
     /* ===================== PANELS (Resolved / Activity / Settings) ===================== */
     .annotate-panel {
+      position: sticky;
+      top: var(--annotate-header-h, 80px);
+      height: calc(100vh - var(--annotate-header-h, 80px));
+      box-sizing: border-box;
       padding: 10px;
       overflow-y: auto;
     }
@@ -1025,6 +1029,12 @@
     <div id="annotate-panel-settings"  class="annotate-panel" style="display:none;"></div>
   `;
   document.documentElement.appendChild(sidebar);
+
+  // Set the header-height CSS variable so .annotate-panel sticky top is exact.
+  sidebar.style.setProperty(
+    '--annotate-header-h',
+    document.getElementById('annotate-sidebar-header').offsetHeight + 'px'
+  );
 
   const sidebarBody      = document.getElementById('annotate-sidebar-body');
   const emptyMsg         = document.getElementById('annotate-empty');
