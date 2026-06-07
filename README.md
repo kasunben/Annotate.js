@@ -183,7 +183,63 @@ P2P is ideal for **live collaborative review sessions**. For async annotation ov
 
 ### Access control in P2P mode
 
-Each browser has a persistent UUID (`annotate_author_id` in `localStorage`) attached to every thread and reply. Edit and Delete buttons are only shown to the browser that created the item — other users see the thread but cannot modify it. Anyone can mark a thread Resolved (collaborative action). The Settings tab does not show a "Clear" button in P2P mode — bulk-wiping local state while peers are online would leave the room inconsistent.
+Each browser has a persistent UUID (`annotate_author_id` in `localStorage`) attached to every thread and reply. Edit and Delete buttons are only shown to the browser that created the item — other users see the thread but cannot modify it. Anyone can mark a thread Resolved (collaborative action).
+
+---
+
+## Admin role
+
+In multi-user modes (server sync and P2P), one browser holds admin access. The admin sees a **Data** section in Settings with two actions:
+- **Clear all annotations** — permanently wipes all threads and activity for the current page (server + local IDB in server-sync; broadcasts a purge signal to all peers + wipes local IDB in P2P)
+- **Reset identity** — clears the display name and browser UUID from this device, issuing a new anonymous identity
+
+### How admin is determined
+
+Two layers, evaluated in order:
+
+| Layer | How | When to use |
+|---|---|---|
+| **Explicit** (`data-admin-id`) | Add `data-admin-id="<your-uuid>"` to the script tag. Whoever's browser holds that UUID in localStorage is admin, on any device. | Shared sites, P2P rooms, anywhere you want a permanent designated admin |
+| **First-annotator** (default) | No config needed. The author of the oldest thread on the page becomes admin automatically. | Single-operator pages, quick setups |
+
+Offline and BroadcastChannel mode always grant admin to everyone (single-user, no peers to affect).
+
+### How to find your UUID
+
+Open **Settings → About** in the sidebar. Your **Browser ID** is shown at the bottom of the About section. Click it to copy. That's the UUID to use as `data-admin-id`.
+
+### How to assign admin
+
+```html
+<!-- 1. Find your UUID in Settings → About (click to copy) -->
+<!-- 2. Add it to the script tag: -->
+<script src="annotate.min.js"
+        data-site-id="my-site"
+        data-room-id="f3a9c271-…"
+        data-admin-id="550e8400-e29b-41d4-a716-446655440000">
+</script>
+```
+
+Only the browser whose `localStorage.getItem('annotate_author_id')` matches `data-admin-id` will see the Data section. All other browsers — including other tabs in the same browser — see no admin controls.
+
+**To grant admin to a second device:** Copy your UUID from Settings → About, then on the second device open the browser console and run:
+
+```js
+localStorage.setItem('annotate_author_id', '<your-uuid>');
+```
+
+Reload — that device is now also an admin (same UUID, same person).
+
+### How to reassign admin
+
+| Scenario | What to do |
+|---|---|
+| Transfer to a new person | Get their UUID (they open Settings → About and copy it), then update `data-admin-id` in your HTML. Deploy. |
+| Admin leaves the team | Update `data-admin-id` to the new admin's UUID and deploy. |
+| Admin cleared their browser / lost their UUID | Update `data-admin-id` in the HTML to a fresh UUID the new admin copies from their Settings. |
+| No `data-admin-id` set (first-annotator) and admin is gone | Add an explicit `data-admin-id` to the HTML pointing to the new admin's UUID. |
+
+The HTML attribute is always the escape hatch — whoever controls the HTML controls admin.
 
 ---
 

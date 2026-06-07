@@ -1025,6 +1025,25 @@
       text-decoration: none;
     }
     .annotate-about-link:hover { text-decoration: underline; }
+    .annotate-about-id-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 8px;
+      flex-wrap: wrap;
+    }
+    .annotate-about-id {
+      font-family: monospace;
+      font-size: 11px;
+      color: #374151;
+      background: #e5e7eb;
+      border-radius: 4px;
+      padding: 2px 6px;
+      cursor: pointer;
+      word-break: break-all;
+      user-select: all;
+    }
+    .annotate-about-id:hover { background: #d1d5db; }
   `;
   document.head.appendChild(style);
 
@@ -1997,6 +2016,11 @@
         <p class="annotate-settings-hint annotate-privacy-note">${_privacyNote()}</p>
         <a class="annotate-about-link" href="https://github.com/kasunben/Annotate.js"
            target="_blank" rel="noopener">View on GitHub</a>
+        <div class="annotate-about-id-row">
+          <span class="annotate-settings-hint" style="margin:0">Browser ID</span>
+          <code class="annotate-about-id" id="annotate-about-id-val"
+                title="Click to copy — use as data-admin-id to lock in admin access">${_authorId}</code>
+        </div>
       </div>`;
     var exportImportHtml = `
       <div class="annotate-settings-group">
@@ -2033,6 +2057,19 @@
     nameInput.addEventListener('keydown', function (e) {
       if (e.key === 'Enter') { _saveName(); nameInput.blur(); }
     });
+
+    // Browser ID — click to copy (used to set data-admin-id on the script tag)
+    var idEl = _panelSettings.querySelector('#annotate-about-id-val');
+    if (idEl) {
+      idEl.addEventListener('click', function () {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(_authorId).then(function () {
+            idEl.textContent = 'Copied!';
+            setTimeout(function () { idEl.textContent = _authorId; }, 1500);
+          }).catch(function () {}); // clipboard blocked — text is still selectable
+        }
+      });
+    }
 
     // Export / Import wiring (always present)
     _panelSettings.querySelector('#annotate-export-btn').addEventListener('click', _exportData);
