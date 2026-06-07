@@ -24,9 +24,17 @@ Annotate.js/
 ├── relay/
 │   ├── worker.js            # Cloudflare Worker + Durable Object relay (WebSocket signaling)
 │   └── wrangler.toml        # Wrangler config for deployment
+├── tests/
+│   ├── unit/                    # Vitest — server helper functions and REST endpoints
+│   ├── integration/             # Vitest — full thread lifecycle via supertest
+│   ├── e2e/                     # Playwright — browser-level specs (single, BC, server-sync, access-control)
+│   └── fixtures/                # Minimal HTML pages loaded by E2E tests
+├── vitest.config.mjs            # Vitest config — pool: forks, DATABASE_PATH=:memory:
+├── playwright.config.mjs        # Playwright config — headless Chromium, webServer with :memory: DB
 ├── .github/
 │   └── workflows/
-│       └── docker-publish.yml  # Publishes to GHCR on v*.*.* tags
+│       ├── docker-publish.yml  # Publishes to GHCR on v*.*.* tags
+│       └── ci.yml              # CI: unit+integration → E2E (runs on every push/PR)
 ├── Dockerfile               # Multi-stage: esbuild bundle in stage 1, lean Node runtime in stage 2
 ├── docker-compose.yml       # image: ghcr.io/…; named volume; PORT override
 ├── ecosystem.config.js      # PM2 config — instances: 1 (SQLite single-writer constraint)
@@ -156,6 +164,10 @@ are available immediately after `npm start`.
 | `npm run pm2:stop` | Stop PM2 process (keeps it in pm2 list) |
 | `npm run pm2:restart` | Restart PM2 process |
 | `npm run pm2:logs` | Tail PM2 logs |
+| `npm test` | Run unit + integration tests once |
+| `npm run test:coverage` | Unit + integration with lcov coverage report |
+| `npm run test:e2e` | Playwright E2E tests (headless Chromium) |
+| `npm run test:all` | `test:coverage` then `test:e2e` |
 
 ### Deployment
 
@@ -491,6 +503,31 @@ See `docs/rfc-p2p-sync.md` for full architecture decisions.
 
 ## Testing
 
+### Automated tests
+
+```bash
+npm run test:coverage   # 82 unit + integration tests; server coverage report
+npm run test:e2e        # 15 E2E tests (headless Chromium via Playwright)
+npm run test:all        # both in sequence
+```
+
+| Layer | Tool | What's covered |
+|---|---|---|
+| **Unit** | Vitest + `pool: forks` | `rowToThread` / `threadToRow` / `rowToActivity` helpers; DB schema |
+| **Integration** | Vitest + supertest | All 11 REST endpoints; thread lifecycle; ownership; admin delete; `?since=` incremental pulls |
+| **E2E** | Playwright (headless Chromium) | Offline persist/reload; BroadcastChannel multi-tab; server-sync two-user; access-control gating; resolve/un-resolve; reply persistence |
+
+**Key implementation details for tests:**
+- `server/db.js` reads `DATABASE_PATH` env var; tests set `DATABASE_PATH=:memory:` for an isolated in-memory DB per process
+- Vitest `pool: 'forks'` gives each test file its own process and fresh module cache
+- E2E tests use unique `?<tag>=<value>` URL query params per test so `_pageUrl` differs on the server — prevents cross-test thread contamination on the shared in-memory DB
+- `waitForLoadState('networkidle')` is used (not `waitForSelector`) in server-sync tests to ensure the initial `pullThreads()` HTTP request completes before `visibilitychange` is dispatched
+- `page.waitForResponse` must be set up **before** the action that triggers the POST, or the response may be missed
+- `annotate.js` (raw source) cannot do P2P — the P2P E2E spec is skipped unless `RUN_P2P=1` is set
+- CI (`.github/workflows/ci.yml`) runs unit+integration first, then E2E on success
+
+### Manual demo pages
+
 Three demo pages available after `npm start`:
 
 - **Offline-only (no server)**: `http://localhost:3000/demo/demo.html`
@@ -499,7 +536,7 @@ Three demo pages available after `npm start`:
 
 **Note:** The server runs on port 3000. If the port is already in use (common during development when testing stops and the process remains), use `npm run kill-port` to free it, or manually kill the process with `lsof -nP -iTCP:3000 -sTCP:LISTEN` and `kill -9 <PID>`.
 
-Test checklist for any change:
+### Manual checklist for any change
 - Select text → comment button appears (tooltip "Add a comment"), positioned correctly
 - Add Thread → Highlight appears, ThreadCard created in sidebar
 - Reload page → Threads reload, Highlights re-applied
