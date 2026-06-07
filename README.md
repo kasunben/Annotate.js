@@ -189,9 +189,31 @@ Each browser has a persistent UUID (`annotate_author_id` in `localStorage`) atta
 
 ## Admin role
 
-In multi-user modes (server sync and P2P), one browser holds admin access. The admin sees a **Data** section in Settings with two actions:
-- **Clear all annotations** — permanently wipes all threads and activity for the current page (server + local IDB in server-sync; broadcasts a purge signal to all peers + wipes local IDB in P2P)
+### What "admin" means — and what it doesn't
+
+Admin is a **UI gate, not a cryptographic lock.**
+
+The feature exists to prevent well-meaning collaborators from accidentally wiping shared annotation data. It is **not** designed to stop a determined person who is willing to inspect the page.
+
+**What admin protects against:**
+- A regular user accidentally seeing and triggering a destructive action they shouldn't have access to
+- Anonymous guests clearing annotations they did not create
+
+**What admin does NOT protect against:**
+- Someone who views the page HTML — `data-admin-id` is visible in the source
+- Someone who opens DevTools and runs `localStorage.setItem('annotate_author_id', '<admin-uuid>')` to claim any identity
+- A malicious peer in P2P mode (though the `ADMIN_CLEAR` message is verified on receive, a peer who knows the admin UUID can forge the signal)
+
+**The honest framing:** Annotate.js admin is appropriate for trusted groups — teams, reviewers who know each other, public documents where participants act in good faith. For adversarial environments where you cannot trust everyone who can view the page source, infrastructure-level access controls (server authentication, firewall rules, private deployment) are the right answer. The admin feature alone is not sufficient.
+
+### What admin can do
+
+In multi-user modes (server sync and P2P), the admin sees a **Data** section in Settings with two destructive actions that are hidden from all other users:
+
+- **Clear all annotations** — permanently wipes all threads and activity for the current page (server + local IDB in server-sync; broadcasts a purge signal to all connected peers + wipes local IDB in P2P)
 - **Reset identity** — clears the display name and browser UUID from this device, issuing a new anonymous identity
+
+In offline and BroadcastChannel mode everyone is treated as admin (single-user context, no other users to protect).
 
 ### How admin is determined
 
@@ -199,20 +221,20 @@ Two layers, evaluated in order:
 
 | Layer | How | When to use |
 |---|---|---|
-| **Explicit** (`data-admin-id`) | Add `data-admin-id="<your-uuid>"` to the script tag. Whoever's browser holds that UUID in localStorage is admin, on any device. | Shared sites, P2P rooms, anywhere you want a permanent designated admin |
-| **First-annotator** (default) | No config needed. The author of the oldest thread on the page becomes admin automatically. | Single-operator pages, quick setups |
+| **Explicit** (`data-admin-id`) | Add `data-admin-id="<uuid>"` to the script tag. The browser whose `localStorage.annotate_author_id` matches that UUID sees the Data section, on any device. | Shared sites, P2P rooms, any case where you want a stable, permanent designated admin |
+| **First-annotator** (default, no config) | The author of the oldest active thread on the page becomes admin automatically. Recomputed on each page load. | Quick setups and single-operator pages where the first person to annotate is naturally the admin |
 
-Offline and BroadcastChannel mode always grant admin to everyone (single-user, no peers to affect).
+> The first-annotator heuristic is convenient but fragile in collaborative settings: if the first annotator deletes all their threads, admin shifts to the next oldest author. For stable, multi-user deployments set `data-admin-id` explicitly.
 
 ### How to find your UUID
 
-Open **Settings → About** in the sidebar. Your **Browser ID** is shown at the bottom of the About section. Click it to copy. That's the UUID to use as `data-admin-id`.
+Open **Settings → Display Name** in the sidebar. Your **Browser ID** is shown below the name field as a monospace pill. Click it to copy to the clipboard. That is the UUID to use as `data-admin-id`.
 
 ### How to assign admin
 
 ```html
-<!-- 1. Find your UUID in Settings → About (click to copy) -->
-<!-- 2. Add it to the script tag: -->
+<!-- 1. Open Settings → Display Name → copy the Browser ID pill -->
+<!-- 2. Add it to your script tag: -->
 <script src="annotate.min.js"
         data-site-id="my-site"
         data-room-id="f3a9c271-…"
@@ -220,26 +242,37 @@ Open **Settings → About** in the sidebar. Your **Browser ID** is shown at the 
 </script>
 ```
 
-Only the browser whose `localStorage.getItem('annotate_author_id')` matches `data-admin-id` will see the Data section. All other browsers — including other tabs in the same browser — see no admin controls.
+Only the browser whose `localStorage.annotate_author_id` equals the `data-admin-id` value will see the Data section. Every other browser — including other tabs in the same browser — sees no admin controls.
 
-**To grant admin to a second device:** Copy your UUID from Settings → About, then on the second device open the browser console and run:
+> **Note:** `data-admin-id` is visible in your page's HTML source. Anyone who can read the source knows which UUID grants admin. Do not treat the UUID itself as a secret. The protection is the UI gate, not secrecy of the value.
+
+**To use the same admin identity on a second device:** copy your UUID from Settings, then on the second device open the browser console and run:
 
 ```js
 localStorage.setItem('annotate_author_id', '<your-uuid>');
 ```
 
-Reload — that device is now also an admin (same UUID, same person).
+Reload — that device is now also an admin. This is intentional: it lets the same person use admin controls from multiple devices. It also means that if someone else knows your UUID and is willing to run this command, they can claim admin — which is why this system suits trusted environments only.
 
 ### How to reassign admin
 
 | Scenario | What to do |
 |---|---|
-| Transfer to a new person | Get their UUID (they open Settings → About and copy it), then update `data-admin-id` in your HTML. Deploy. |
-| Admin leaves the team | Update `data-admin-id` to the new admin's UUID and deploy. |
-| Admin cleared their browser / lost their UUID | Update `data-admin-id` in the HTML to a fresh UUID the new admin copies from their Settings. |
-| No `data-admin-id` set (first-annotator) and admin is gone | Add an explicit `data-admin-id` to the HTML pointing to the new admin's UUID. |
+| Transfer to a new person | Get their UUID (they open Settings → Display Name and copy it), update `data-admin-id` in your HTML, and deploy. |
+| Admin leaves the team | Same as above — update `data-admin-id` to the new admin's UUID and deploy. |
+| Admin cleared their browser storage / lost their UUID | New admin copies their UUID from their Settings, you update `data-admin-id` in the HTML and deploy. |
+| No `data-admin-id` set (first-annotator) and admin is gone | Add an explicit `data-admin-id` pointing to the new admin's UUID. From that point admin is stable regardless of who annotated first. |
 
-The HTML attribute is always the escape hatch — whoever controls the HTML controls admin.
+The HTML attribute is always the escape hatch — whoever controls the HTML controls admin. This means in practice: the admin system is only as strong as the access control on your HTML file.
+
+### Choosing the right deployment for your threat model
+
+| Context | Recommended approach |
+|---|---|
+| Personal notes / offline use | No concern — you are the only user |
+| Trusted team (everyone can be trusted not to misuse access) | First-annotator default or explicit `data-admin-id` — either works |
+| Public page with anonymous readers, trusted author | Explicit `data-admin-id`; accept that a motivated person with DevTools access could claim admin |
+| Public page, genuinely adversarial users | Server sync behind authentication + infrastructure-level access controls — the admin UI gate alone is not sufficient |
 
 ---
 
@@ -339,7 +372,7 @@ Annotate.js/
 | **Threads** | Active annotations for the current page |
 | **Resolved** | Resolved annotations. Fully frozen — Edit, Delete, and Reply are hidden for everyone (including the owner). Anyone can click **Un-Resolve** to send the thread back to active, where Edit and Delete become available to the owner again. |
 | **Activity** | Shared event feed — all users' creates, replies, edits, resolves, deletes, exports, and imports (blue dot for export/import events) |
-| **Settings** | Display name (changes backfill all your existing threads and replies and sync to peers) · **Export / Import** (download JSON backup; import merges by last-write-wins; available in all sync modes) · "Clear all annotations" (offline/BC mode only) · About (app name, version, active sync mode, mode-aware privacy note, GitHub link) |
+| **Settings** | **About** (app name, version, active sync mode chip, mode-aware privacy note, GitHub link) · **Display name** (changes backfill all your existing threads and replies and sync to peers; **Browser ID** click-to-copy pill shown below the field) · **P2P Session** (Room, live Peers count, Via tier — P2P mode only) · **Export / Import** (download JSON backup; import merges by last-write-wins; available in all sync modes) · **Data** (admin only: "Clear all annotations" + "Reset identity") |
 
 ---
 
