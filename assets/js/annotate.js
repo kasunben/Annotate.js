@@ -335,6 +335,22 @@
   // treated as admin (first-annotator heuristic, computed after loadThreads).
   const _adminId = (document.currentScript && document.currentScript.dataset.adminId) || null;
   let   _isAdmin = false; // set by _computeIsAdmin() after threads load
+
+  // ── Poll interval (server sync only) ──────────────────────────────────────
+  // data-sync-ms: integer milliseconds; defaults to 30 000 ms (30 s).
+  // Invalid values (non-numeric, zero, negative) fall back to 30 000 with a warning.
+  const _rawPollMs    = document.currentScript && document.currentScript.dataset.syncMs;
+  const _parsedPollMs = _rawPollMs ? parseInt(_rawPollMs, 10) : 0;
+  const _pollMs       = (_parsedPollMs > 0) ? _parsedPollMs : 30000;
+  if (_rawPollMs && !(_parsedPollMs > 0)) {
+    console.warn('Annotate.js: data-sync-ms="' + _rawPollMs + '" is invalid — using default 30 s poll interval.');
+  }
+
+  // ── Mutual-exclusivity guard ───────────────────────────────────────────────
+  if (_syncUrl && _roomId) {
+    console.warn('Annotate.js: data-sync-url and data-room-id are mutually exclusive — ' +
+      'data-room-id will be ignored; server sync is active.');
+  }
   // No-ops replaced by initP2P() when a room is active.
   let _p2pBroadcastThread   = function () {};
   let _p2pBroadcastActivity = function () {};
@@ -3106,12 +3122,12 @@
         pullThreads();
         pullActivity();
         flushDirtyThreads();
-        setInterval(function () { pullThreads(); pullActivity(); }, 30000);
+        setInterval(function () { pullThreads(); pullActivity(); }, _pollMs);
         document.addEventListener('visibilitychange', function () {
           if (document.visibilityState === 'visible') { pullThreads(); pullActivity(); }
         });
       }
-      if (_roomId) { initP2P(); }
+      if (_roomId && !_syncUrl) { initP2P(); }
     })
     .catch(function (err) {
       console.warn('Annotate.js: IndexedDB unavailable — running in memory-only mode', err);
