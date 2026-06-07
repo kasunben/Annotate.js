@@ -2016,11 +2016,6 @@
         <p class="annotate-settings-hint annotate-privacy-note">${_privacyNote()}</p>
         <a class="annotate-about-link" href="https://github.com/kasunben/Annotate.js"
            target="_blank" rel="noopener">View on GitHub</a>
-        <div class="annotate-about-id-row">
-          <span class="annotate-settings-hint" style="margin:0">Browser ID</span>
-          <code class="annotate-about-id" id="annotate-about-id-val"
-                title="Click to copy — use as data-admin-id to lock in admin access">${_authorId}</code>
-        </div>
       </div>`;
     var exportImportHtml = `
       <div class="annotate-settings-group">
@@ -2038,6 +2033,11 @@
         <input class="annotate-settings-input" id="annotate-name-input" type="text"
                value="${getAuthor()}" placeholder="Enter your name…" />
         <p class="annotate-settings-hint">Shown on all your annotations and replies.</p>
+        <div class="annotate-about-id-row">
+          <span class="annotate-settings-hint" style="margin:0">Browser ID</span>
+          <code class="annotate-about-id" id="annotate-about-id-val"
+                title="Click to copy — use as data-admin-id to lock in admin access">${_authorId}</code>
+        </div>
       </div>
       ${exportImportHtml}
       ${clearGroupHtml}
