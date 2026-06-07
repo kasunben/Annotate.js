@@ -339,6 +339,9 @@
   let _p2pBroadcastThread   = function () {};
   let _p2pBroadcastActivity = function () {};
   let _p2pBroadcastAdmin    = function () {}; // replaced when P2P connects; sends ADMIN_CLEAR
+  // P2P session stats — updated by initRelayP2P / initNostrP2P; read by _renderSettingsTab.
+  var _p2pConnectedCount = 0;    // number of currently open WebRTC data channels
+  var _p2pTier           = null; // null | 'relay' | 'nostr' — active signaling tier
   // Batch peer/BC updates — flushed in createdAt order after a 50 ms settle window.
   var _pendingPeerBatch = {};   // id → thread (last-write-wins within the window)
   var _pendingPeerTimer = null; // setTimeout handle for the flush
@@ -1044,6 +1047,35 @@
       user-select: all;
     }
     .annotate-about-id:hover { background: #d1d5db; }
+    .annotate-p2p-info {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin-top: 4px;
+    }
+    .annotate-p2p-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .annotate-p2p-key {
+      font-size: 11px;
+      color: #9ca3af;
+      width: 44px;
+      flex-shrink: 0;
+    }
+    .annotate-p2p-val {
+      font-size: 12px;
+      color: #374151;
+    }
+    .annotate-p2p-room {
+      font-family: monospace;
+      background: #e5e7eb;
+      border-radius: 4px;
+      padding: 1px 5px;
+      font-size: 11px;
+    }
+    .annotate-p2p-live { color: #16a34a; font-weight: 500; }
   `;
   document.head.appendChild(style);
 
@@ -1988,6 +2020,17 @@
     reader.readAsText(file);
   }
 
+  /** Patch the live Peers span in Settings without a full re-render. */
+  function _updateP2PPeersDisplay() {
+    var el = document.getElementById('annotate-p2p-peers-val');
+    if (!el) return; // Settings panel not open — nothing to patch
+    var peersText = _p2pConnectedCount > 0
+      ? _p2pConnectedCount + ' connected'
+      : 'Searching for peers…';
+    el.textContent = peersText;
+    el.className = 'annotate-p2p-val' + (_p2pConnectedCount > 0 ? ' annotate-p2p-live' : '');
+  }
+
   /** Settings tab — display name + clear data */
   function _renderSettingsTab() {
     // Hide the bulk-clear button in P2P and server-sync modes. In P2P, wiping
@@ -2026,6 +2069,32 @@
         <button class="annotate-settings-btn" id="annotate-import-btn">Import from file…</button>
         <p class="annotate-settings-hint">Merges threads and activity from a JSON export. Settings in the file override current settings. Importing another user's export grants you edit access to their threads.</p>
       </div>`;
+    var p2pHtml = _roomId ? (function () {
+      var shortRoom = _roomId.slice(0, 8) + '…' + _roomId.slice(-4);
+      var peersText = _p2pConnectedCount > 0
+        ? _p2pConnectedCount + ' connected'
+        : 'Searching for peers…';
+      var tierText  = _p2pTier === 'relay' ? 'Relay'
+                    : _p2pTier === 'nostr' ? 'NOSTR'
+                    : 'Connecting…';
+      return '<div class="annotate-settings-group">' +
+        '<label class="annotate-settings-label">P2P Session</label>' +
+        '<div class="annotate-p2p-info">' +
+          '<div class="annotate-p2p-row">' +
+            '<span class="annotate-p2p-key">Room</span>' +
+            '<code class="annotate-p2p-val annotate-p2p-room">' + shortRoom + '</code>' +
+          '</div>' +
+          '<div class="annotate-p2p-row">' +
+            '<span class="annotate-p2p-key">Peers</span>' +
+            '<span id="annotate-p2p-peers-val" class="annotate-p2p-val ' + (_p2pConnectedCount > 0 ? 'annotate-p2p-live' : '') + '">' + peersText + '</span>' +
+          '</div>' +
+          '<div class="annotate-p2p-row">' +
+            '<span class="annotate-p2p-key">Via</span>' +
+            '<span class="annotate-p2p-val">' + tierText + '</span>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+    })() : '';
     _panelSettings.innerHTML = `
       ${aboutHtml}
       <div class="annotate-settings-group">
@@ -2039,6 +2108,7 @@
                 title="Click to copy — use as data-admin-id to lock in admin access">${_authorId}</code>
         </div>
       </div>
+      ${p2pHtml}
       ${exportImportHtml}
       ${clearGroupHtml}
     `;
@@ -2281,6 +2351,8 @@
    * Handles: THREAD, ACTIVITY, REQUEST_STATE, STATE_SNAPSHOT messages.
    */
   function _setupDataChannelMessages(dc) {
+    dc.onopen  = function () { _p2pConnectedCount++; _updateP2PPeersDisplay(); };
+    dc.onclose = function () { _p2pConnectedCount = Math.max(0, _p2pConnectedCount - 1); _updateP2PPeersDisplay(); };
     dc.onmessage = function (ev) {
       var msg;
       try { msg = JSON.parse(ev.data); } catch (e) { return; }
@@ -2408,6 +2480,7 @@
 
     ws.onopen = function () {
       onConnected();
+      _p2pTier = 'relay';
       ws.send(JSON.stringify({ type: 'join', room: _roomId, peerId: myPeerId }));
     };
     ws.onmessage = function (ev) {
@@ -2471,6 +2544,7 @@
       console.warn('Annotate.js P2P: NOSTR init failed', e);
       return;
     }
+    _p2pTier = 'nostr';
 
     var threadPair   = room.makeAction('thread');
     var activityPair = room.makeAction('activity');
@@ -2506,8 +2580,15 @@
     });
 
     room.onPeerJoin(function (peerId) {
+      _p2pConnectedCount++;
+      _updateP2PPeersDisplay();
       // As the later-joining peer, request state from the existing peer.
       sendRequest({ pageUrl: _pageUrl }, [peerId]);
+    });
+
+    room.onPeerLeave(function () {
+      _p2pConnectedCount = Math.max(0, _p2pConnectedCount - 1);
+      _updateP2PPeersDisplay();
     });
 
     _p2pBroadcastThread   = function (t)       { sendThread(t); };
