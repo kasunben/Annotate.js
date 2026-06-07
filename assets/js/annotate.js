@@ -845,6 +845,12 @@
     #annotate-comment-btn:hover {
       background: #333;
     }
+    @media (pointer: coarse) {
+      #annotate-comment-btn {
+        padding: 10px;
+        border-radius: 8px;
+      }
+    }
 
     /* ===================== PANELS (Resolved / Activity / Settings) ===================== */
     .annotate-panel {
@@ -3044,6 +3050,41 @@
       hideCommentBtn();
     }
   });
+
+  // ── Mobile support ────────────────────────────────────────────────────────
+  // On mobile, text selection ends with touch events — mouseup never fires
+  // after a long-press-and-drag selection.  selectionchange is the reliable
+  // cross-device hook.  A 300 ms debounce prevents firing on every handle-drag
+  // tick while the user is still adjusting the selection.
+  var _scTimer = null;
+  document.addEventListener('selectionchange', function () {
+    if (_scTimer) clearTimeout(_scTimer);
+    _scTimer = setTimeout(function () {
+      _scTimer = null;
+      var sel = window.getSelection();
+      var txt = sel ? sel.toString().trim() : '';
+      if (!txt || !sel.rangeCount) { hideCommentBtn(); return; }
+      // Skip if mouseup already showed the button for this exact selection
+      if (lastSelectedText === txt && !commentBtn.classList.contains('hidden')) return;
+      lastSelectedText = txt;
+      lastSelectedRange = sel.getRangeAt(0).cloneRange();
+      var rect = sel.getRangeAt(0).getBoundingClientRect();
+      var btnSize = 36; // larger offset on touch; CSS enlarges the rendered button too
+      var x = rect.left + (rect.width / 2) - (btnSize / 2);
+      var y = rect.top - btnSize - 6;
+      if (x < 8) x = 8;
+      if (x + btnSize > window.innerWidth - 8) x = window.innerWidth - btnSize - 8;
+      commentBtn.style.left = x + 'px';
+      commentBtn.style.top  = y + 'px';
+      commentBtn.classList.remove('hidden');
+    }, 300);
+  });
+
+  // Dismiss the button when touching outside (mirrors the mousedown guard).
+  // passive: true — we never call preventDefault, so no scroll jank.
+  document.addEventListener('touchstart', function (e) {
+    if (!commentBtn.contains(e.target)) hideCommentBtn();
+  }, { passive: true });
 
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape') hideCommentBtn();
