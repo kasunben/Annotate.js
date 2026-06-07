@@ -328,9 +328,17 @@
   // Activated by data-room-id. Mutually exclusive with data-sync-url (server sync).
   const _roomId    = (document.currentScript && document.currentScript.dataset.roomId)   || null;
   const _relayUrl  = (document.currentScript && document.currentScript.dataset.relayUrl) || 'wss://relay.annotate-js.workers.dev';
+
+  // ── Admin state ───────────────────────────────────────────────────────────
+  // data-admin-id: operator-set UUID — whoever holds this UUID in localStorage
+  // is the admin.  If absent, the author of the oldest thread on the page is
+  // treated as admin (first-annotator heuristic, computed after loadThreads).
+  const _adminId = (document.currentScript && document.currentScript.dataset.adminId) || null;
+  let   _isAdmin = false; // set by _computeIsAdmin() after threads load
   // No-ops replaced by initP2P() when a room is active.
   let _p2pBroadcastThread   = function () {};
   let _p2pBroadcastActivity = function () {};
+  let _p2pBroadcastAdmin    = function () {}; // replaced when P2P connects; sends ADMIN_CLEAR
   // Batch peer/BC updates — flushed in createdAt order after a 50 ms settle window.
   var _pendingPeerBatch = {};   // id → thread (last-write-wins within the window)
   var _pendingPeerTimer = null; // setTimeout handle for the flush
@@ -1355,6 +1363,24 @@
     return item.authorId === _authorId;
   }
 
+  // Determine whether the current browser is the site admin.
+  // Called after loadThreads (with IDB threads) and again after the first
+  // pullThreads (with server threads) so server-sync mode gets the full picture.
+  //
+  // Priority order:
+  //   1. Offline / BC          → always admin (single-user, no peers to affect)
+  //   2. data-admin-id override → admin iff _authorId matches the attribute value
+  //   3. First-annotator        → oldest non-deleted thread's authorId on this page
+  //      (if no threads yet → everyone is potential admin; first one to annotate wins)
+  function _computeIsAdmin(threads) {
+    if (!_syncUrl && !_roomId) { _isAdmin = true; return; }
+    if (_adminId)              { _isAdmin = (_authorId === _adminId); return; }
+    var withOwner = (threads || []).filter(function (t) { return t.authorId && !t.deletedAt; });
+    if (!withOwner.length)     { _isAdmin = true; return; } // no threads yet
+    withOwner.sort(function (a, b) { return a.createdAt < b.createdAt ? -1 : 1; });
+    _isAdmin = withOwner[0].authorId === _authorId;
+  }
+
   function _buildReplyEl(reply) {
     const el = document.createElement('div');
     el.className = 'annotate-reply';
@@ -1947,14 +1973,16 @@
   function _renderSettingsTab() {
     // Hide the bulk-clear button in P2P and server-sync modes. In P2P, wiping
     // local state while peers are online leaves the room inconsistent. In
-    // server-sync, per-user clear will be reintroduced once user accounts exist.
-    // Only offline / BroadcastChannel mode (no sync URL, no room) shows it.
-    var showClearBtn = !_roomId && !_syncUrl;
+    // Admin-only Data section: shown to the first annotator (or data-admin-id holder).
+    // In offline/BC mode everyone is admin.  In server-sync / P2P only the admin sees it.
+    var showClearBtn = _isAdmin;
     var clearGroupHtml = showClearBtn ? `
       <div class="annotate-settings-group">
         <label class="annotate-settings-label">Data</label>
         <button class="annotate-settings-btn-danger" id="annotate-clear-btn">Clear all annotations</button>
-        <p class="annotate-settings-hint">Permanently removes all threads and activity for this site.</p>
+        <p class="annotate-settings-hint">Permanently removes all threads and activity for this page. Cannot be undone.</p>
+        <button class="annotate-settings-btn-danger" id="annotate-reset-identity-btn" style="margin-top:8px">Reset identity</button>
+        <p class="annotate-settings-hint">Clears your display name and browser ID from this device. You will appear as a new anonymous user and lose edit access to your existing annotations.</p>
       </div>` : '';
     var aboutHtml = `
       <div class="annotate-settings-group annotate-about">
@@ -2019,15 +2047,51 @@
       }
     });
 
-    if (!showClearBtn) return; // no clear button in server-sync or P2P modes
+    if (!showClearBtn) return; // non-admin — no Data section rendered
 
     _panelSettings.querySelector('#annotate-clear-btn').addEventListener('click', function () {
-      if (!window.confirm('Delete all annotations and activity for this site? This cannot be undone.')) return;
-      // This button only renders in offline/BroadcastChannel mode — wipe everything.
-      Promise.resolve()
+      if (!window.confirm('Delete ALL annotations and activity for this page? This cannot be undone.')) return;
+
+      if (_syncUrl) {
+        // Server-sync: delete from server first, then wipe local IDB, then reload
+        Promise.all([
+          fetch(_syncUrl + '/threads?siteId=' + encodeURIComponent(_siteId), { method: 'DELETE' }),
+          fetch(_syncUrl + '/activity?siteId=' + encodeURIComponent(_siteId), { method: 'DELETE' }),
+        ])
         .then(function () { return dbClearAll(_siteId, _db); })
         .then(function () { window.location.reload(); })
-        .catch(function (e) { console.warn('Annotate.js: clearAll failed', e); });
+        .catch(function (e) { console.warn('Annotate.js: clearAll (server) failed', e); });
+
+      } else if (_roomId) {
+        // P2P: broadcast a single ADMIN_CLEAR signal; each peer verifies authority and
+        // self-purges. Do NOT broadcast individual soft-deleted THREAD messages — the
+        // ownership gate in _onPeerThread rejects cross-user deletions, and individual
+        // deletes are indistinguishable from a rogue-peer mass-delete attack.
+        _p2pBroadcastAdmin({ adminId: _adminId || _authorId });
+        dbClearAll(_siteId, _db)
+          .then(function () { window.location.reload(); })
+          .catch(function (e) { console.warn('Annotate.js: clearAll (P2P) failed', e); });
+
+      } else {
+        // Offline / BroadcastChannel
+        dbClearAll(_siteId, _db)
+          .then(function () { window.location.reload(); })
+          .catch(function (e) { console.warn('Annotate.js: clearAll failed', e); });
+      }
+    });
+
+    _panelSettings.querySelector('#annotate-reset-identity-btn').addEventListener('click', function () {
+      if (!window.confirm(
+        'Reset your browser identity?\n\n' +
+        'Your display name and browser ID will be cleared. ' +
+        'You will lose edit access to any annotations you have made on this device.'
+      )) return;
+      localStorage.removeItem(_AUTHOR_KEY);
+      localStorage.removeItem(_AUTHOR_ID_KEY);
+      _authorId = generateId();
+      _isAdmin  = false; // will be recomputed if user re-opens Settings after annotating
+      localStorage.setItem(_AUTHOR_ID_KEY, _authorId);
+      _renderSettingsTab(); // re-render: name input resets + Data section may disappear
     });
   }
 
@@ -2121,6 +2185,11 @@
   function _onPeerThread(incoming) {
     if (!_db) return;
     dbGetThread(_db, incoming.id).then(function (existing) {
+      // Ownership gate: only the thread owner may soft-delete their own thread via P2P.
+      // Prevents rogue peers from broadcasting unauthorised deletions of others' threads.
+      if (incoming.deletedAt && existing && !existing.deletedAt && existing.authorId) {
+        if (incoming.authorId !== existing.authorId) return;
+      }
       if (!existing || incoming.updatedAt > existing.updatedAt) {
         dbSaveThread(_db, incoming).then(function () {
           _batchRenderAfterPull(incoming);
@@ -2134,6 +2203,40 @@
     if (_db) dbAddActivity(_db, entry);
   }
 
+  /**
+   * Handle an incoming ADMIN_CLEAR signal from a peer.
+   * Verifies admin authority before wiping local IDB and reloading.
+   *
+   * Verification strategy:
+   *   • data-admin-id set: sender's adminId must match _adminId (shared HTML attribute).
+   *     All legitimate users loaded the same page with the same data-admin-id, so they
+   *     share this value. An outsider who guessed the room UUID has no _adminId.
+   *   • data-admin-id absent: sender's adminId must match the oldest thread's authorId
+   *     on this page (first-annotator heuristic, consistent with _computeIsAdmin).
+   */
+  function _onPeerAdminClear(msg) {
+    if (!_db) return;
+    var senderId = msg && msg.adminId;
+    if (!senderId) return;
+
+    function _purge() {
+      dbClearAll(_siteId, _db).then(function () { window.location.reload(); });
+    }
+
+    if (_adminId) {
+      // Explicit mode: sender must match the configured data-admin-id UUID
+      if (senderId === _adminId) _purge();
+    } else {
+      // First-annotator mode: verify sender is the oldest thread's author for this page
+      _dbGetByPage(_db, _pageUrl).then(function (threads) {
+        var withOwner = threads.filter(function (t) { return t.authorId && !t.deletedAt; });
+        if (!withOwner.length) return; // no local state to verify against — reject
+        withOwner.sort(function (a, b) { return a.createdAt < b.createdAt ? -1 : 1; });
+        if (withOwner[0].authorId === senderId) _purge();
+      });
+    }
+  }
+
   // ── Relay tier (Tier 1/2): custom WebSocket signaling + RTCPeerConnection ─
 
   /**
@@ -2144,8 +2247,9 @@
     dc.onmessage = function (ev) {
       var msg;
       try { msg = JSON.parse(ev.data); } catch (e) { return; }
-      if (msg.type === 'THREAD')   { _onPeerThread(msg.thread);   return; }
-      if (msg.type === 'ACTIVITY') { _onPeerActivity(msg.entry);  return; }
+      if (msg.type === 'THREAD')      { _onPeerThread(msg.thread);   return; }
+      if (msg.type === 'ACTIVITY')    { _onPeerActivity(msg.entry);  return; }
+      if (msg.type === 'ADMIN_CLEAR') { _onPeerAdminClear(msg);      return; }
       if (msg.type === 'REQUEST_STATE') {
         _dbGetByPage(_db, _pageUrl).then(function (threads) {
           if (dc.readyState === 'open')
@@ -2300,6 +2404,13 @@
           p.dc.send(JSON.stringify({ type: 'ACTIVITY', entry: e }));
       });
     };
+    _p2pBroadcastAdmin = function (payload) {
+      Object.keys(peers).forEach(function (pid) {
+        var p = peers[pid];
+        if (p.dc && p.dc.readyState === 'open')
+          p.dc.send(JSON.stringify({ type: 'ADMIN_CLEAR', adminId: payload.adminId }));
+      });
+    };
   }
 
   // ── NOSTR tier (Tier 3): Trystero fallback ─────────────────────────────────
@@ -2328,14 +2439,17 @@
     var activityPair = room.makeAction('activity');
     var requestPair  = room.makeAction('request');
     var snapshotPair = room.makeAction('snapshot');
+    var adminPair    = room.makeAction('admin');
 
     var sendThread   = threadPair[0],   getThread   = threadPair[1];
     var sendActivity = activityPair[0], getActivity = activityPair[1];
     var sendRequest  = requestPair[0],  getRequest  = requestPair[1];
     var sendSnapshot = snapshotPair[0], getSnapshot = snapshotPair[1];
+    var sendAdmin    = adminPair[0],    getAdmin    = adminPair[1];
 
     getThread(function (data)   { _onPeerThread(data); });
     getActivity(function (data) { _onPeerActivity(data); });
+    getAdmin(function (data)    { _onPeerAdminClear(data); });
     getRequest(function (data, peerId) {
       _dbGetByPage(_db, _pageUrl).then(function (threads) {
         sendSnapshot({ threads: threads }, [peerId]);
@@ -2359,8 +2473,9 @@
       sendRequest({ pageUrl: _pageUrl }, [peerId]);
     });
 
-    _p2pBroadcastThread   = function (t) { sendThread(t); };
-    _p2pBroadcastActivity = function (e) { sendActivity(e); };
+    _p2pBroadcastThread   = function (t)       { sendThread(t); };
+    _p2pBroadcastActivity = function (e)       { sendActivity(e); };
+    _p2pBroadcastAdmin    = function (payload) { sendAdmin(payload); };
   }
 
   // ── P2P entry point ────────────────────────────────────────────────────────
@@ -2538,6 +2653,7 @@
         });
       })).then(function () {
         _rerenderAfterPull(serverThreads.filter(function (st) { return !dirtyIds.has(st.id); }));
+        _computeIsAdmin(serverThreads); // recompute admin after every server pull
       });
     })
     .catch(function (e) { console.warn('Annotate.js: pullThreads failed', e); });
@@ -2820,6 +2936,11 @@
     .then(function (db) {
       _db = db;
       return loadThreads(db);
+    })
+    .then(function () {
+      // Compute admin status from local IDB threads (first pass).
+      // pullThreads will recompute again once the server responds (server-sync mode).
+      return _dbGetByPage(_db, _pageUrl).then(_computeIsAdmin);
     })
     .then(function () {
       if (_syncUrl) {
