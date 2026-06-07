@@ -2,7 +2,20 @@
 
 Lightweight vanilla JS library that adds inline annotation and threaded comments to any web page via a single `<script>` tag. Zero runtime dependencies.
 
-> **Git workflow:** Do NOT commit or push to the remote repository unless the user explicitly asks. Make changes locally and wait for instruction before staging, committing, or pushing.
+> **Git workflow — feature development and bug fixes:**
+>
+> Follow these steps for every feature or bug fix, unless explicitly instructed otherwise:
+>
+> 1. **Branch** — always start from an up-to-date `main`. Pull latest, then create a new branch named after the feature/fix (e.g. `feat/my-feature`, `fix/my-bug`).
+> 2. **Develop** — implement the change in the new branch.
+> 3. **Tests** — add or update automated tests to cover the change.
+> 4. **Verify** — run the full test suite (`npm run test:all`) and confirm everything passes.
+> 5. **Docs** — update `README.md`, `CLAUDE.md`, and any other relevant docs.
+> 6. **Version bump** — increment `package.json` version if the change warrants a release.
+> 7. **Rebuild** — run `npm install` then `npm run build` to regenerate `annotate.min.js`.
+> 8. **Commit** — stage and commit all changes with a clear commit message.
+> 9. **No push without consent** — do NOT push to the remote repository unless the user explicitly asks.
+> 10. **No PR without consent** — do NOT open a pull request unless the user explicitly asks. When asked to create a PR, **always create it as a draft first**.
 
 ## Project Structure
 
