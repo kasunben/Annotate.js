@@ -89,8 +89,9 @@ The client distributes as a **single JS file**. The server is optional — omit 
 | `data-room-id` | Activates P2P mode (UUID recommended) | absent = no P2P |
 | `data-relay-url` | Override hosted relay for P2P signaling | project's hosted relay |
 | `data-admin-id` | UUID of the designated admin browser; that browser's Settings → Data section is shown in all sync modes | absent = first-annotator heuristic |
+| `data-sync-ms` | Server sync poll interval in milliseconds (Mode 3 only); invalid values fall back to 30 000 with a console warning | `30000` |
 
-`data-sync-url` and `data-room-id` are mutually exclusive — pick one mode per embed.
+`data-sync-url` and `data-room-id` are mutually exclusive — the library warns and suppresses P2P if both are set.
 
 Everything (IndexedDB layer, anchor serialization, BroadcastChannel, P2P sync, server sync, UI, CSS) is inlined into the IIFE.
 Injects a collapsible right sidebar + floating comment button. All CSS embedded via `document.createElement('style')`.
@@ -615,8 +616,10 @@ Three demo pages available after `npm start`:
 - **IIFE pattern** — all client code scoped in `(function() { ... })()` to avoid globals; esbuild wraps this in an outer IIFE via `--format=iife`, making it a nested IIFE (harmless)
 - **`siteId`** — read via `document.currentScript.dataset.siteId`; IDB namespace + server/P2P scope
 - **`syncUrl`** — read via `document.currentScript.dataset.syncUrl`; `null` = sync disabled
-- **`roomId`** — read via `document.currentScript.dataset.roomId`; `null` = P2P disabled; activates `initP2P()` in boot sequence
+- **`roomId`** — read via `document.currentScript.dataset.roomId`; `null` = P2P disabled; activates `initP2P()` in boot sequence only when `_syncUrl` is absent (mutual exclusivity enforced)
 - **`relayUrl`** — read via `document.currentScript.dataset.relayUrl`; defaults to `'wss://relay.annotate-js.workers.dev'`; overridden by `data-relay-url` for self-hosted relay
+- **`_pollMs`** — read from `data-sync-ms` via `document.currentScript.dataset.syncMs`; validated via `parseInt > 0`; falls back to `30000` with a `console.warn` if the attribute is present but invalid (non-numeric, zero, or negative); replaces the hardcoded `30000` in the `setInterval` for server sync; absent attribute is the same as `30000` (no warning)
+- **Mutual exclusivity guard** — if both `_syncUrl` and `_roomId` are set, `console.warn` fires at IIFE init and `initP2P()` is not called (`if (_roomId && !_syncUrl)`); server sync takes precedence
 - **BroadcastChannel** — `_bc` created for same-origin multi-tab sync; posts `THREAD_UPDATE` / `ACTIVITY_UPDATE` messages; handler in `_bc.onmessage` applies last-write-wins before re-rendering; gracefully absent (`null`) in environments without BroadcastChannel support
 - **BroadcastChannel `>=` not `>` for updatedAt** — IDB is shared across all same-origin tabs in the same browser; when Tab 1 calls `dbSaveThread` and then (inside `.then()`) posts the BC message, the write has already committed to shared IDB by the time Tab 2's handler calls `dbGetThread`; so `existing.updatedAt === msg.thread.updatedAt` for brand-new threads, and a strict `>` comparison would skip the re-render entirely; the condition must use `>=` so equal timestamps still trigger `_rerenderAfterPull`
 - **P2P tiered signaling** — `initP2P()` tries the relay first with a 5 s fallback timer; `_initRelayP2P(url, onConnected, onFailure)` calls `onConnected()` on `ws.onopen` (clears timer); `onFailure()` fires on `ws.onerror`; both paths lead to `_initNostrP2P()` as fallback

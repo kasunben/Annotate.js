@@ -94,6 +94,23 @@ In all cases, annotations are stored in IndexedDB and survive page reloads.
 
 ---
 
+## Script tag API
+
+All configuration is done via `data-*` attributes on the `<script>` tag. These are the stable public interface of Annotate.js — all six attributes will be preserved without breaking changes from v1 onwards.
+
+| Attribute | Type | Default | Notes |
+|---|---|---|---|
+| `data-site-id` | string | `"default"` | Namespaces annotations — IDB, server, and P2P scope. Set a unique value per site. |
+| `data-sync-url` | URL | — | Activates server sync (Mode 3). **Mutually exclusive with `data-room-id`**. |
+| `data-room-id` | UUID | — | Activates P2P sync (Mode 4). **Mutually exclusive with `data-sync-url`**. Requires `annotate.min.js`. |
+| `data-relay-url` | WSS URL | hosted relay | Override the hosted signaling relay with a self-hosted one (P2P mode only). |
+| `data-admin-id` | UUID | — | Grants the admin Data panel to the browser whose `localStorage.annotate_author_id` matches. If absent, the first annotator becomes admin. |
+| `data-sync-ms` | integer (ms) | `30000` | Server sync poll interval (Mode 3 only). Values ≤ 0 or non-numeric fall back to 30 s with a console warning. |
+
+> `data-sync-url` and `data-room-id` are mutually exclusive. If both are set the library logs a console warning and ignores `data-room-id`.
+
+---
+
 ## Multi-user sync
 
 ### 1. Check Node.js version
@@ -597,6 +614,9 @@ Point `src` at your deployed server and you're done:
 - [ ] Live re-render of the Resolved tab on inbound peer updates (currently re-renders only on tab switch)
 
 **Shipped:**
+- [x] `data-sync-ms` — configurable server sync poll interval; defaults to 30 s; invalid values fall back with a console warning
+- [x] `data-sync-url` + `data-room-id` mutual exclusivity enforced at runtime — console warning + P2P suppressed when both set
+- [x] Stable `data-*` attribute API documented as public interface ahead of v1
 - [x] Ownership-based access control — Edit/Delete gated per browser; Resolve open to all; offline mode unrestricted
 - [x] Frozen Resolved tab — Edit / Delete / Reply hidden on resolved threads; **Un-Resolve** toggle open to anyone, reseeds the Threads tab locally and across peers without reload
 - [x] About panel in Settings — app name, version (injected at build time from `package.json`), sync mode chip, mode-aware privacy note, GitHub link
