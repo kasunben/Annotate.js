@@ -318,6 +318,15 @@ Annotate.js/
 │   ├── routes/threads.js            # Thread REST endpoints
 │   ├── routes/activity.js           # Activity REST endpoints
 │   └── data/                        # annotate.db lives here (gitignored)
+├── tests/
+│   ├── unit/                        # Vitest — REST endpoint + db helper unit tests
+│   ├── integration/                 # Vitest — full HTTP lifecycle tests
+│   ├── e2e/                         # Playwright — browser E2E specs
+│   ├── helpers/                     # Shared test factories and mock relay
+│   └── fixtures/                    # Minimal HTML pages for E2E tests
+├── vitest.config.mjs                # Vitest config (pool: forks, DATABASE_PATH=:memory:)
+├── playwright.config.mjs            # Playwright config (Chromium, webServer)
+├── .github/workflows/ci.yml         # CI — unit+integration → E2E on every push/PR
 ├── Dockerfile                       # Multi-stage build → lean production image
 ├── docker-compose.yml               # Named volume for SQLite persistence
 ├── ecosystem.config.js              # PM2 config (instances: 1 — SQLite single-writer)
@@ -338,6 +347,10 @@ Annotate.js/
 |--------|-------------|
 | `npm run build` | Bundle + minify via esbuild → `annotate.min.js` (Trystero bundled in) |
 | `npm start` | Start the server on port 3000 |
+| `npm test` | Run unit + integration tests (Vitest) |
+| `npm run test:coverage` | Unit + integration tests with lcov coverage report |
+| `npm run test:e2e` | E2E tests (Playwright, headless Chromium) |
+| `npm run test:all` | Unit + integration + coverage + E2E |
 | `npm run kill-port` | Free port 3000 if already in use |
 | `npm run pm2:start` | Start with PM2 (requires `npm i -g pm2`) |
 | `npm run pm2:restart` | Restart the PM2 process |
@@ -399,7 +412,28 @@ Thread {
 
 ## Testing
 
-No automated test suite. Three demo pages available after `npm start`:
+### Automated test suite
+
+```bash
+npm test               # unit + integration (Vitest, in-memory SQLite)
+npm run test:coverage  # same + lcov coverage report
+npm run test:e2e       # E2E browser tests (Playwright, headless Chromium)
+npm run test:all       # unit + integration + coverage + E2E
+```
+
+| Layer | Tool | What it covers |
+|-------|------|---------------|
+| **Unit** | Vitest + supertest | `rowToThread`/`threadToRow` mapping, all 11 REST endpoints |
+| **Integration** | Vitest | Full thread lifecycle, ownership rules, admin delete, incremental `?since=` pull, export/import merge |
+| **E2E** | Playwright (Chromium) | Select → annotate → persist; BroadcastChannel multi-tab; server-sync two-user; access control; resolve/un-resolve; replies |
+
+Each Vitest test file runs in a forked process with `DATABASE_PATH=:memory:` so every file gets a fresh, isolated SQLite database.
+
+CI runs on every push and pull request via `.github/workflows/ci.yml` (unit + integration with coverage upload → E2E with Playwright report on failure).
+
+### Demo pages (manual testing)
+
+Three demo pages available after `npm start`:
 
 | Page | URL | Use for |
 |------|-----|---------|

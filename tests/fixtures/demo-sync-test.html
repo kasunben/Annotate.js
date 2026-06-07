@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Annotate.js E2E Server-Sync Test Fixture</title>
+  <style>
+    body { font-family: Georgia, serif; max-width: 720px; margin: 60px auto; padding: 0 24px; line-height: 1.75; }
+    h1 { font-size: 1.5rem; }
+    p { margin: 1em 0; }
+  </style>
+</head>
+<body>
+  <h1>Server Sync E2E Test Page</h1>
+
+  <p id="p1">We have spent two decades optimising software for speed of delivery. Continuous deployment and feature flags have collapsed the distance between an idea and its appearance in production.</p>
+
+  <p id="p2">But speed has a shadow. When the cost of shipping is low, the cost of thinking is paid less often. Features accumulate and interfaces grow.</p>
+
+  <p id="p3">Slowing down does not mean shipping less. It means inserting deliberation between impulse and action. It means asking whether a feature should exist before asking how it should be built.</p>
+
+  <!-- Server sync mode — data-sync-url set to the local test server -->
+  <script src="/assets/js/annotate.js"
+          data-site-id="e2e-sync-test"
+          data-sync-url="http://localhost:3000"></script>
+</body>
+</html>
