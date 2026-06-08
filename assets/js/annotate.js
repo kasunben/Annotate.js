@@ -206,7 +206,14 @@
   // selection to a stable XPath + character offsets so highlights can be
   // reconstructed on every page load.
   //
-  // Anchor shape: { xpath: string, startOffset: number, endOffset: number }
+  // Anchor shape: { xpath: string, startOffset: number, endXpath: string, endOffset: number }
+  //   xpath       — XPath of the start text node
+  //   startOffset — character offset within the start text node
+  //   endXpath    — XPath of the end text node (may differ from xpath for cross-node selections)
+  //   endOffset   — character offset within the end text node
+  //
+  // Legacy anchors (pre-fix) only have { xpath, startOffset, endOffset }.
+  // restoreRange treats a missing endXpath as equal to xpath for backward compat.
   //
   // ⚠️  Always call serializeRange(range) BEFORE highlightRange(range).
   //     Wrapping the selected text in <mark> mutates the DOM and changes the
@@ -257,12 +264,13 @@
    * ⚠️  Call this BEFORE highlightRange() — see note above.
    *
    * @param  {Range} range
-   * @returns {{ xpath: string, startOffset: number, endOffset: number }}
+   * @returns {{ xpath: string, startOffset: number, endXpath: string, endOffset: number }}
    */
   function serializeRange(range) {
     return {
       xpath:       _getXPath(range.startContainer),
       startOffset: range.startOffset,
+      endXpath:    _getXPath(range.endContainer),
       endOffset:   range.endOffset,
     };
   }
@@ -273,28 +281,35 @@
    * changed since the annotation was created. Callers should show a
    * "highlight unavailable" indicator rather than silently dropping the Thread.
    *
-   * @param  {{ xpath: string, startOffset: number, endOffset: number }} anchor
+   * Supports both new-style anchors ({ xpath, startOffset, endXpath, endOffset })
+   * and legacy anchors ({ xpath, startOffset, endOffset }) where start and end
+   * were assumed to be in the same text node.
+   *
+   * @param  {{ xpath: string, startOffset: number, endXpath?: string, endOffset: number }} anchor
    * @returns {Range|null}
    */
   function restoreRange(anchor) {
     try {
-      const result = document.evaluate(
-        anchor.xpath,
-        document,
-        null,
-        XPathResult.FIRST_ORDERED_NODE_TYPE,
-        null
-      );
-      const node = result.singleNodeValue;
-      if (!node) return null;
+      var startNode = document.evaluate(
+        anchor.xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null
+      ).singleNodeValue;
+      if (!startNode) return null;
 
-      // Guard: offsets must be within the text node's actual length
-      const len = node.nodeValue ? node.nodeValue.length : 0;
-      if (anchor.startOffset > len || anchor.endOffset > len) return null;
+      // endXpath absent in legacy anchors → end is in the same node as start
+      var endXpath = anchor.endXpath || anchor.xpath;
+      var endNode = document.evaluate(
+        endXpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null
+      ).singleNodeValue;
+      if (!endNode) return null;
 
-      const range = document.createRange();
-      range.setStart(node, anchor.startOffset);
-      range.setEnd(node, anchor.endOffset);
+      // Guard: offsets must be within their respective text nodes
+      var startLen = startNode.nodeValue ? startNode.nodeValue.length : 0;
+      var endLen   = endNode.nodeValue   ? endNode.nodeValue.length   : 0;
+      if (anchor.startOffset > startLen || anchor.endOffset > endLen) return null;
+
+      var range = document.createRange();
+      range.setStart(startNode, anchor.startOffset);
+      range.setEnd(endNode, anchor.endOffset);
       return range;
     } catch (e) {
       console.warn('Annotate.js: restoreRange failed', anchor, e);
@@ -1384,16 +1399,97 @@
   }
 
   // --- Highlight helper ---
+  /**
+   * Wrap a Range in one or more <mark class="annotate-highlight"> elements.
+   *
+   * Single-node ranges (start and end in the same text node) use the fast path:
+   * range.surroundContents(mark) wraps everything in one element.
+   *
+   * Cross-node ranges (selection spans inline elements or paragraph boundaries)
+   * fall back to _highlightRangeMulti, which wraps each text-node segment in its
+   * own <mark>. The first mark is returned and carries mark._allMarks — an array
+   * of every mark created — so callers can operate on the full set (unwrap,
+   * toggle is-resolved, add click listeners, etc.).
+   *
+   * Returns null if no text could be wrapped (e.g. collapsed range, DOM error).
+   */
   function highlightRange(range) {
+    var mark = document.createElement('mark');
+    mark.className = 'annotate-highlight';
     try {
-      const mark = document.createElement('mark');
-      mark.className = 'annotate-highlight';
       range.surroundContents(mark);
+      mark._allMarks = [mark];
       return mark;
     } catch (e) {
-      console.warn('Annotate.js: could not highlight range', e);
-      return null;
+      // surroundContents throws HierarchyRequestError when the range partially
+      // contains element nodes (i.e. crosses element boundaries). Fall back to
+      // wrapping each text-node segment individually.
+      var marks = _highlightRangeMulti(range);
+      if (!marks.length) {
+        console.warn('Annotate.js: could not highlight range', e);
+        return null;
+      }
+      marks[0]._allMarks = marks;
+      return marks[0];
     }
+  }
+
+  /**
+   * Collect all text nodes within a cross-element Range and wrap each in a
+   * separate <mark>. Returns an array of created mark elements (may be empty).
+   * Collects nodes before mutating the DOM to avoid iterator invalidation.
+   */
+  function _highlightRangeMulti(range) {
+    var startNode = range.startContainer;
+    var endNode   = range.endContainer;
+    var ancestor  = range.commonAncestorContainer;
+
+    // Step 1: collect all text nodes that fall within the range (before any DOM mutation)
+    var textNodes = [];
+    var iter = document.createNodeIterator(ancestor, NodeFilter.SHOW_TEXT, null);
+    var node;
+    var inRange = false;
+    while ((node = iter.nextNode())) {
+      if (node === startNode) inRange = true;
+      if (inRange) textNodes.push(node);
+      if (node === endNode) break;
+    }
+
+    // Step 2: wrap each collected text node with its own <mark>
+    var marks = [];
+    textNodes.forEach(function (tn) {
+      var nr = document.createRange();
+      if (tn === startNode && tn === endNode) {
+        nr.setStart(tn, range.startOffset);
+        nr.setEnd(tn, range.endOffset);
+      } else if (tn === startNode) {
+        nr.setStart(tn, range.startOffset);
+        nr.setEnd(tn, tn.nodeValue.length);
+      } else if (tn === endNode) {
+        nr.setStart(tn, 0);
+        nr.setEnd(tn, range.endOffset);
+      } else {
+        nr.setStart(tn, 0);
+        nr.setEnd(tn, tn.nodeValue.length);
+      }
+      if (nr.collapsed) return;
+      var m = document.createElement('mark');
+      m.className = 'annotate-highlight';
+      try { nr.surroundContents(m); marks.push(m); } catch (e2) { /* skip */ }
+    });
+
+    return marks;
+  }
+
+  /**
+   * Return all <mark> elements associated with a primary mark.
+   * For single-node highlights, returns [mark].
+   * For multi-segment highlights, returns mark._allMarks.
+   * Safe to call with null/undefined.
+   */
+  function _allMarksOf(mark) {
+    if (!mark) return [];
+    return mark._allMarks || [mark];
   }
 
   // --- Shared card/reply rendering helpers ---
@@ -1622,7 +1718,7 @@
             // it as soon as they switch back to Threads.
             if (isUnresolve) {
               var mark = _threadMarks[t.id] || null;
-              if (mark) mark.classList.remove('is-resolved');
+              _allMarksOf(mark).forEach(function (m) { m.classList.remove('is-resolved'); });
               var threadsCard = sidebarBody.querySelector('[data-thread-id="' + t.id + '"]');
               if (threadsCard) {
                 threadsCard.style.opacity = '';
@@ -1763,8 +1859,10 @@
     if (mark) {
       card._annotationMark = mark;
       _threadMarks[thread.id] = mark;
-      mark._threadId = thread.id;
-      mark.addEventListener('click', function () { openSidebar(); _focusCard(thread.id); });
+      _allMarksOf(mark).forEach(function (m) {
+        m._threadId = thread.id;
+        m.addEventListener('click', function () { openSidebar(); _focusCard(thread.id); });
+      });
     }
 
     const headerHeight = document.getElementById('annotate-sidebar-header').offsetHeight;
@@ -2231,8 +2329,10 @@
 
   /** Unwrap a <mark> element, leaving its text children in place */
   function _unwrapMark(mark) {
-    var p = mark.parentNode;
-    if (p) { while (mark.firstChild) p.insertBefore(mark.firstChild, mark); p.removeChild(mark); }
+    _allMarksOf(mark).forEach(function (m) {
+      var p = m.parentNode;
+      if (p) { while (m.firstChild) p.insertBefore(m.firstChild, m); p.removeChild(m); }
+    });
   }
 
   /** Push one activity entry to the server. Fire-and-forget. */
@@ -2688,14 +2788,18 @@
           _renderedThreadIds.delete(st.id);
         }
         if (existingMark) {
-          existingMark.classList.add('is-resolved');
+          _allMarksOf(existingMark).forEach(function (m) { m.classList.add('is-resolved'); });
         } else if (st.anchor) {
           var rr = restoreRange(st.anchor);
           if (rr) {
             var rm = highlightRange(rr);
-            rm.classList.add('is-resolved');
-            rm.addEventListener('click', function () { openSidebar(); _switchTab('Resolved'); });
-            _threadMarks[st.id] = rm;
+            if (rm) {
+              _allMarksOf(rm).forEach(function (m) {
+                m.classList.add('is-resolved');
+                m.addEventListener('click', function () { openSidebar(); _switchTab('Resolved'); });
+              });
+              _threadMarks[st.id] = rm;
+            }
           }
         }
         return;
@@ -2722,7 +2826,7 @@
         existingCard.style.opacity      = '';
         existingCard.style.pointerEvents = '';
         _renderedThreadIds.add(st.id);
-        if (existingMark) existingMark.classList.remove('is-resolved');
+        _allMarksOf(existingMark).forEach(function (m) { m.classList.remove('is-resolved'); });
         _renderSavedCard(existingCard, st);
       }
     });
@@ -2834,11 +2938,13 @@
         const range = thread.anchor ? restoreRange(thread.anchor) : null;
         const mark  = range ? highlightRange(range) : null;
         if (mark) {
-          mark.classList.add('is-resolved');
-          mark._threadId = thread.id;
-          mark.addEventListener('click', function () {
-            openSidebar();
-            _switchTab('Resolved');
+          _allMarksOf(mark).forEach(function (m) {
+            m.classList.add('is-resolved');
+            m._threadId = thread.id;
+            m.addEventListener('click', function () {
+              openSidebar();
+              _switchTab('Resolved');
+            });
           });
           _threadMarks[thread.id] = mark;
         }
@@ -2924,7 +3030,10 @@
       card._threadId = thread.id;
       card.dataset.threadId = thread.id;
       _renderedThreadIds.add(thread.id);
-      if (mark) { mark._threadId = thread.id; _threadMarks[thread.id] = mark; }
+      if (mark) {
+        _allMarksOf(mark).forEach(function (m) { m._threadId = thread.id; });
+        _threadMarks[thread.id] = mark;
+      }
 
       if (_db) {
         dbSaveThread(_db, thread)

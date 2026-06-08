@@ -262,9 +262,10 @@ Use these terms consistently in code, comments, and future API design:
 
   quote:       string,   // snapshot of selected text
   anchor: {
-    xpath:       string, // XPath to text node
-    startOffset: number,
-    endOffset:   number,
+    xpath:       string, // XPath to start text node
+    startOffset: number, // character offset within start text node
+    endXpath:    string, // XPath to end text node (may differ for cross-node selections; absent in legacy anchors pre-fix)
+    endOffset:   number, // character offset within end text node
   },
 
   body:        string,
@@ -353,14 +354,34 @@ ActivityEntries are synced to the server when `data-sync-url` is set — all use
 
 `Range` objects are ephemeral. On save, serialize to a stable `Anchor`:
 ```js
-// Serialize
-anchor = { xpath: getXPath(range.startContainer), startOffset, endOffset }
+// Serialize (serializeRange)
+anchor = {
+  xpath:       getXPath(range.startContainer),  // XPath to start text node
+  startOffset: range.startOffset,               // offset within start node
+  endXpath:    getXPath(range.endContainer),    // XPath to end text node (NEW — may differ for cross-node)
+  endOffset:   range.endOffset,                 // offset within end node
+}
 
-// Restore on page load
-range = document.evaluate(anchor.xpath) → set offsets → reconstruct Range → apply <mark>
+// Restore on page load (restoreRange)
+// Resolves start and end nodes independently, backward-compat with legacy anchors that lack endXpath
+startNode = document.evaluate(anchor.xpath)
+endNode   = document.evaluate(anchor.endXpath || anchor.xpath)
+range.setStart(startNode, anchor.startOffset)
+range.setEnd(endNode, anchor.endOffset)
 ```
 If XPath no longer resolves (DOM changed), show Thread in sidebar with a
 "highlight unavailable" badge rather than dropping it silently.
+
+**Cross-node selections** (text that spans `<p>` or inline element boundaries) previously broke on
+reload because `endOffset` was applied to `startContainer` instead of `endContainer`. The `endXpath`
+field fixes this. Legacy anchors (no `endXpath`) fall back to the single-node path unchanged.
+
+**Multi-mark highlights** — `range.surroundContents()` throws `HierarchyRequestError` when a Range
+crosses element boundaries. `highlightRange()` catches this and falls back to `_highlightRangeMulti()`,
+which wraps each text-node segment in its own `<mark>`. The primary (first) mark carries
+`mark._allMarks = [mark, ...]`; `_allMarksOf(mark)` returns the full array. All downstream operations
+(unwrap, `is-resolved` class, click listeners, `_threadId`) iterate `_allMarksOf()` so the whole
+highlight group is treated atomically.
 
 ---
 
@@ -507,6 +528,12 @@ See `docs/rfc-p2p-sync.md` for full architecture decisions.
 - ✅ **`@media (pointer: coarse)` CSS** — enlarges the comment button to ~36×36 px on touch screens (was 24×24 px — below the 44 px minimum touch target); uses `padding: 10px; border-radius: 8px` scoped to `#annotate-comment-btn`
 - ✅ **Button tap safety on mobile** — tapping the button on mobile may briefly clear the native selection (browser-dependent), triggering `selectionchange` with empty text; the 300 ms debounce ensures `hideCommentBtn()` cannot fire before the `click` event uses `lastSelectedRange` to add the annotation; `touchstart` guard (`commentBtn.contains(e.target)`) prevents the dismiss handler from clearing state while the user's finger is on the button
 
+### Phase M — Cross-node anchor and multi-mark highlights ✅
+- ✅ **`endXpath` in anchor shape** — `serializeRange` now records `endXpath: _getXPath(range.endContainer)` alongside `xpath` (start node); fixes silent highlight loss on reload for any selection that crosses paragraph or inline-element boundaries, where `endOffset` was previously applied to the wrong (`startContainer`) node; `restoreRange` falls back to `anchor.endXpath || anchor.xpath` for backward compatibility with existing IDB / server data
+- ✅ **`highlightRange` multi-mark fallback** — `range.surroundContents` throws `HierarchyRequestError` for cross-element ranges; `highlightRange` catches this and calls `_highlightRangeMulti`, which (1) collects all target text nodes via a `NodeIterator` before any DOM mutation to avoid iterator invalidation, then (2) wraps each in its own `<mark class="annotate-highlight">`; the first mark carries `mark._allMarks = [mark, ...]` so callers receive a single anchor point for the full group
+- ✅ **`_allMarksOf(mark)` helper** — returns `mark._allMarks || [mark]`; safe to call with `null`; all downstream operations (`_unwrapMark`, `is-resolved` class, click listener wiring, `_threadId`) iterate `_allMarksOf(...)` for atomic group treatment
+- ✅ **Backward compatibility** — legacy anchors (no `endXpath`) resolve end node from `anchor.xpath`; single-node `highlightRange` fast path unchanged; cross-node ranges that previously received no highlight now receive a multi-mark highlight
+
 ### Phase F — Future work
 - User account registration + annotation profile management (Milestone 2)
 - Deploy hosted relay to `wss://relay.annotate-js.workers.dev` (Phase P2 infra, relay code ready)
@@ -554,6 +581,8 @@ Three demo pages available after `npm start`:
 - Select text → comment button appears (tooltip "Add a comment"), positioned correctly
 - Add Thread → Highlight appears, ThreadCard created in sidebar
 - Reload page → Threads reload, Highlights re-applied
+- **Cross-paragraph selection** — select text that spans two `<p>` elements → highlight applied across both paragraphs; reload → both paragraph segments re-highlighted correctly; card positioned at the start of the selection
+- **Non-English / multi-segment text** — select text spanning inline elements (e.g. `<strong>`) → multi-mark highlight applied; reload → highlight restored; card positioned correctly
 - Edit, delete, resolve each work and persist
 - Replies thread correctly, persist across reload
 - Resolved threads appear in Resolved tab, not Threads tab; Edit/Delete/Reply absent on resolved cards
@@ -644,6 +673,8 @@ Three demo pages available after `npm start`:
 - **Version exposed to UI via `--define`** — `_VERSION` at the top of the IIFE is substituted by esbuild from `package.json` at build time via `--define:__ANNOTATE_VERSION__="\"$(node -p "require('./package.json').version")\""`; the raw source (loaded directly without the build) falls back to the literal string `"dev"` so unbundled embeds are visually distinguishable from releases; surfaced in **Settings → About** alongside the active sync mode chip (`_syncMode()`) and a mode-aware privacy note (`_privacyNote()`)
 - **P2P requires `annotate.min.js`** — the raw source **cannot do P2P at all**: (1) `_trysteroJoin` is `undefined` so the NOSTR fallback (Tier 3) is a no-op; (2) the hosted Cloudflare relay is not yet deployed so Tier 1 also fails; result: `_p2pBroadcastThread` / `_p2pBroadcastActivity` remain as no-op stubs, annotations save to local IDB only, nothing reaches other peers; `initP2P()` logs a single upfront `console.warn` when `data-room-id` is set but `_trysteroJoin` is not a function; `demo-p2p.html` has an explicit HTML comment warning against swapping `src` to the raw file; raw `annotate.js` supports Modes 1–3 (offline, BroadcastChannel, server sync) only
 - **Card positioning** — `_anchorTop` on each DOM element; `repositionCards()` re-evaluates on every height change via `ResizeObserver`
+- **`endXpath` in anchor — cross-node serialization** — `serializeRange` stores both `xpath` (start container XPath) and `endXpath` (end container XPath); `restoreRange` resolves each node independently with `anchor.endXpath || anchor.xpath` backward compat fallback; legacy anchors without `endXpath` continue to work (single-node assumption, same as before); fixes highlights disappearing on reload for cross-paragraph or cross-element selections where `endOffset` was previously applied to the wrong node
+- **`highlightRange` / `_highlightRangeMulti` / `_allMarksOf`** — `highlightRange` tries the fast path (`range.surroundContents`) and falls back to `_highlightRangeMulti` when the range crosses element boundaries (`HierarchyRequestError`); `_highlightRangeMulti` uses a two-step approach: (1) collect all target text nodes via `NodeIterator` before mutating the DOM (prevents iterator invalidation), then (2) wrap each in its own `<mark>`; the primary (first) mark stores `mark._allMarks = [mark, ...]`; `_allMarksOf(mark)` returns `mark._allMarks || [mark]`; all downstream operations (`_unwrapMark`, `is-resolved` class toggle, click listener wiring, `_threadId` assignment) call `_allMarksOf(mark).forEach(...)` so the full highlight group is treated atomically regardless of how many marks it spans
 - **Soft-delete** — `deletedAt` on Threads, `deleted` on Replies; never hard-delete so deletes propagate to other clients via GET
 - **`dirty` flag** — client-only; never stored in SQLite; cleared after a successful `syncThread` push
 - **`_renderedThreadIds`** — `Set` tracking IDs of active cards in `sidebarBody`; prevents double-render on first pull after `loadThreads`
