@@ -328,7 +328,7 @@ ActivityEntries are synced to the server when `data-sync-url` is set — all use
 | Activity log | **IndexedDB** (primary) + **SQLite** (server) | Same push/pull pattern as threads; cross-user shared history |
 | User config | **localStorage** | Tiny, simple, global |
 
-**IDB name:** `annotate-{siteId}` · **Version:** 1
+**IDB name:** `annotate-{siteId}` · **Version:** 2 (bumped from 1 to repair crash-corrupted databases — see Key Implementation Notes)
 
 | Object store | Key | Indexes |
 |---|---|---|
@@ -656,6 +656,7 @@ Three demo pages available after `npm start`:
 ## Key Implementation Notes
 
 - **IIFE pattern** — all client code scoped in `(function() { ... })()` to avoid globals; esbuild wraps this in an outer IIFE via `--format=iife`, making it a nested IIFE (harmless)
+- **`openDB` version 2 — crash-recovery schema repair** — `indexedDB.open('annotate-{siteId}', 2)` uses version 2 (bumped from 1); `onupgradeneeded` guards each `createObjectStore` with `!db.objectStoreNames.contains(...)` so it is idempotent and safe to re-run on any old database; the version bump ensures that databases left at v1 with no object stores (caused by a browser crash mid-`onupgradeneeded` on first ever load) trigger `onupgradeneeded` again and receive the correct schema; `db.onversionchange = function() { db.close(); }` releases the connection when a future version is opened in another tab so the upgrade is not blocked — no forced `window.location.reload()` here (a reload call would cascade during Playwright page navigations and was the root cause of the IDB E2E test flake)
 - **`siteId`** — read via `document.currentScript.dataset.siteId`; IDB namespace + server/P2P scope
 - **`syncUrl`** — read via `document.currentScript.dataset.syncUrl`; `null` = sync disabled
 - **`roomId`** — read via `document.currentScript.dataset.roomId`; `null` = P2P disabled; activates `initP2P()` in boot sequence only when `_syncUrl` is absent (mutual exclusivity enforced)
