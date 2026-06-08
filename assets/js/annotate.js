@@ -1710,7 +1710,7 @@
           t.updatedAt = new Date().toISOString();
           t.dirty = true;
           return dbSaveThread(_db, t).then(function () {
-            syncThread(t);
+            syncResolve(t);
             // When un-resolving from the Resolved tab, the Threads tab will be
             // out of sync until reload: either the original card is still there
             // but dimmed from the prior Resolve click, or it was filtered out by
@@ -2399,6 +2399,36 @@
       if (t && t.dirty) { t.dirty = false; return dbSaveThread(_db, t); }
     })
     .catch(function (e) { console.warn('Annotate.js: syncThread failed', e); });
+  }
+
+  /**
+   * Sync a resolve or un-resolve action to the server via PATCH /threads/:id/resolve.
+   * This endpoint has no ownership check — any user can resolve or un-resolve.
+   * Also broadcasts to BroadcastChannel and P2P peers so all tabs/peers update immediately.
+   * On server success, clears the dirty flag so flushDirtyThreads does not retry via POST.
+   */
+  function syncResolve(thread) {
+    // Broadcast to same-origin tabs and P2P peers regardless of server-sync mode.
+    if (_bc) _bc.postMessage({ type: 'THREAD_UPDATE', thread: thread });
+    _p2pBroadcastThread(thread);
+    if (!_syncUrl || !_db) return;
+    fetch(_syncUrl + '/threads/' + thread.id + '/resolve', {
+      method:  'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({
+        resolved:   thread.resolved,
+        resolvedBy: thread.resolvedBy  || null,
+        resolvedAt: thread.resolvedAt  || null,
+      }),
+    })
+    .then(function (r) {
+      if (!r.ok) throw new Error('syncResolve failed: ' + r.status);
+      return dbGetThread(_db, thread.id);
+    })
+    .then(function (t) {
+      if (t && t.dirty) { t.dirty = false; return dbSaveThread(_db, t); }
+    })
+    .catch(function (e) { console.warn('Annotate.js: syncResolve failed', e); });
   }
 
   // ── P2P sync functions ────────────────────────────────────────────────────

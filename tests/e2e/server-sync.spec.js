@@ -9,11 +9,19 @@ const url = (tag) => `/tests/fixtures/demo-sync-test.html?ss=${tag}`;
 // annotate.js polls every 30 s, but we trigger an immediate pull via
 // visibilitychange (annotate.js calls pullThreads() on tab focus).
 
-// All mutation syncs use POST /threads. Set up the listener BEFORE the action
-// so we don't race the response.
+// All thread creates/edits/deletes use POST /threads. Set up the listener BEFORE
+// the action so we don't race the response.
 function expectPost(page) {
   return page.waitForResponse(
     (r) => r.url().includes('/threads') && r.request().method() === 'POST',
+    { timeout: 8000 }
+  );
+}
+
+// Resolve and un-resolve use PATCH /threads/:id/resolve (no ownership check).
+function expectResolve(page) {
+  return page.waitForResponse(
+    (r) => r.url().includes('/resolve') && r.request().method() === 'PATCH',
     { timeout: 8000 }
   );
 }
@@ -78,8 +86,8 @@ test.describe('Server sync — two-user multi-browser sync', () => {
     await triggerPull(pageB);
     await pageB.waitForSelector('[data-thread-id]', { timeout: 5000 });
 
-    // Alice resolves (syncThread fires a POST with resolved:true)
-    const resolveDone = expectPost(pageA);
+    // Alice resolves (syncResolve fires a PATCH /threads/:id/resolve)
+    const resolveDone = expectResolve(pageA);
     await pageA.locator('.annotate-resolve-btn').first().click();
     await resolveDone;
 
