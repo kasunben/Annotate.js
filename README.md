@@ -412,7 +412,7 @@ Annotate.js/
 Thread {
   id, siteId, pageUrl,
   quote,          // snapshot of selected text
-  anchor,         // { xpath, startOffset, endOffset } — survives page reload
+  anchor,         // { xpath, startOffset, endXpath, endOffset } — survives page reload
   body, author,
   authorId,       // UUID from localStorage 'annotate_author_id'; null for legacy threads
   createdAt, updatedAt,
@@ -462,6 +462,8 @@ Three demo pages available after `npm start`:
 - [ ] Select text → comment button appears (tooltip "Add a comment" on hover)
 - [ ] Add thread → highlight + card appear in sidebar
 - [ ] Reload → threads and highlights restored
+- [ ] **Cross-paragraph selection** — select text spanning two `<p>` elements → highlight covers both paragraphs; reload → both segments re-highlighted; card positioned at start of selection
+- [ ] **Inline-element selection** — select text spanning a `<strong>` or other inline element → multi-segment highlight applied; reload → highlight fully restored
 - [ ] Edit / delete / resolve persist across reload
 - [ ] Replies persist across reload
 - [ ] Resolved tab shows resolved threads; Edit / Delete / Reply hidden on resolved cards
@@ -614,6 +616,7 @@ Point `src` at your deployed server and you're done:
 - [ ] Live re-render of the Resolved tab on inbound peer updates (currently re-renders only on tab switch)
 
 **Shipped:**
+- [x] Cross-node anchor + multi-mark highlights — selections that span paragraph or inline-element boundaries now survive page reload (`endXpath` field in anchor); `highlightRange` falls back to per-segment `<mark>` wrapping when `surroundContents` would throw; all mark operations (unwrap, resolve, focus) treat the group atomically
 - [x] `data-sync-ms` — configurable server sync poll interval; defaults to 30 s; invalid values fall back with a console warning
 - [x] `data-sync-url` + `data-room-id` mutual exclusivity enforced at runtime — console warning + P2P suppressed when both set
 - [x] Stable `data-*` attribute API documented as public interface ahead of v1
