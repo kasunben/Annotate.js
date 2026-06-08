@@ -37,7 +37,12 @@
     return new Promise(function (resolve, reject) {
       if (!siteId) { reject(new Error('Annotate.js: siteId is required')); return; }
 
-      const request = indexedDB.open('annotate-' + siteId, 1);
+      // Version 2: bumped from 1 so onupgradeneeded always runs for any
+      // existing v1 database. This repairs the case where a browser crash
+      // during the very first page load left the database at v1 without
+      // object stores, causing every subsequent transaction to throw
+      // "not a known object store name".
+      const request = indexedDB.open('annotate-' + siteId, 2);
 
       request.onupgradeneeded = function (e) {
         const db = e.target.result;
@@ -58,7 +63,16 @@
         }
       };
 
-      request.onsuccess = function (e) { resolve(e.target.result); };
+      request.onsuccess = function (e) {
+        const db = e.target.result;
+        // Close this connection when another tab opens a higher version so the
+        // upgrade is not blocked. The page reloads to pick up the new schema.
+        // Close this connection when another tab opens a higher version so the
+        // upgrade is not blocked. No forced reload — the caller's error handlers
+        // deal with subsequent failed transactions gracefully.
+        db.onversionchange = function () { db.close(); };
+        resolve(db);
+      };
       request.onerror   = function (e) {
         console.error('Annotate.js: could not open IndexedDB', e.target.error);
         reject(e.target.error);

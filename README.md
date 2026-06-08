@@ -616,6 +616,7 @@ Point `src` at your deployed server and you're done:
 - [ ] Live re-render of the Resolved tab on inbound peer updates (currently re-renders only on tab switch)
 
 **Shipped:**
+- [x] IDB schema crash-recovery — `openDB` bumped to version 2; repairs any v1 database that lost its object stores after a browser crash mid-upgrade (fixes "not a known object store name" error in server-sync mode on affected browsers)
 - [x] Non-owner Resolve / Un-Resolve in server-sync mode — `PATCH /threads/:id/resolve` now handles both states and has no ownership check; client routes the action through a dedicated `syncResolve()` instead of the ownership-gated `POST /threads` upsert; behaviour is now consistent across all sync modes
 - [x] Cross-node anchor + multi-mark highlights — selections that span paragraph or inline-element boundaries now survive page reload (`endXpath` field in anchor); `highlightRange` falls back to per-segment `<mark>` wrapping when `surroundContents` would throw; all mark operations (unwrap, resolve, focus) treat the group atomically
 - [x] `data-sync-ms` — configurable server sync poll interval; defaults to 30 s; invalid values fall back with a console warning
