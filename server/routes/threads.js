@@ -76,13 +76,21 @@ router.patch('/:id', function (req, res) {
   res.json(rowToThread(row));
 });
 
-// PATCH /threads/:id/resolve
+// PATCH /threads/:id/resolve  — toggle resolved state (open to any user, no ownership check)
+// Body: { resolved: boolean, resolvedBy?: string, resolvedAt?: string }
+// resolved=true  → mark resolved; resolved=false → un-resolve (clears resolvedBy/resolvedAt)
 router.patch('/:id/resolve', function (req, res) {
-  const { resolvedBy, resolvedAt } = req.body;
+  const { resolved, resolvedBy, resolvedAt } = req.body;
   const now = new Date().toISOString();
-  db.prepare(
-    'UPDATE threads SET resolved = 1, resolved_by = ?, resolved_at = ?, updated_at = ? WHERE id = ?'
-  ).run(resolvedBy || null, resolvedAt || now, now, req.params.id);
+  if (resolved === false) {
+    db.prepare(
+      'UPDATE threads SET resolved = 0, resolved_by = NULL, resolved_at = NULL, updated_at = ? WHERE id = ?'
+    ).run(now, req.params.id);
+  } else {
+    db.prepare(
+      'UPDATE threads SET resolved = 1, resolved_by = ?, resolved_at = ?, updated_at = ? WHERE id = ?'
+    ).run(resolvedBy || null, resolvedAt || now, now, req.params.id);
+  }
   const row = getById.get(req.params.id);
   if (!row) return res.status(404).json({ error: 'not found' });
   res.json(rowToThread(row));

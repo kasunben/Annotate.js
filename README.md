@@ -489,6 +489,7 @@ Three demo pages available after `npm start`:
 - [ ] User A annotates → User B sees it within 30 s (or on tab focus)
 - [ ] User A resolves → User B's card dims and the highlight gains `is-resolved` within 30 s
 - [ ] User A **un-resolves** → User B's card undims and the highlight loses `is-resolved` without reload
+- [ ] **Non-owner resolve** — User B (not the thread owner) can click Resolve on User A's thread; resolves successfully (no 403); User A sees the resolved state on next pull
 - [ ] User A deletes → User B's highlight unwraps within 30 s
 - [ ] Kill server → User A can still annotate (offline mode, `dirty=true`)
 - [ ] Restart server → User A's offline annotations push automatically
@@ -612,10 +613,10 @@ Point `src` at your deployed server and you're done:
 
 - [ ] Deploy hosted relay to `wss://relay.annotate-js.workers.dev` (relay code in `relay/` is ready)
 - [ ] User account registration + annotation profile management (Milestone 2)
-- [ ] Server enforcement parity for collaborative actions — `checkOwnership` currently blocks non-owner Resolve / Un-Resolve in server-sync mode
 - [ ] Live re-render of the Resolved tab on inbound peer updates (currently re-renders only on tab switch)
 
 **Shipped:**
+- [x] Non-owner Resolve / Un-Resolve in server-sync mode — `PATCH /threads/:id/resolve` now handles both states and has no ownership check; client routes the action through a dedicated `syncResolve()` instead of the ownership-gated `POST /threads` upsert; behaviour is now consistent across all sync modes
 - [x] Cross-node anchor + multi-mark highlights — selections that span paragraph or inline-element boundaries now survive page reload (`endXpath` field in anchor); `highlightRange` falls back to per-segment `<mark>` wrapping when `surroundContents` would throw; all mark operations (unwrap, resolve, focus) treat the group atomically
 - [x] `data-sync-ms` — configurable server sync poll interval; defaults to 30 s; invalid values fall back with a console warning
 - [x] `data-sync-url` + `data-room-id` mutual exclusivity enforced at runtime — console warning + P2P suppressed when both set
